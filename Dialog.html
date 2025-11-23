@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        select,
+        input {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #loading {
+            text-align: center;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Loading Message -->
+    <div id="loading">読み込み中...</div>
+
+    <!-- Main Form -->
+    <div id="mainForm" class="hidden">
+        <h2 id="formTitle"></h2>
+
+        <form id="dataForm" onsubmit="handleSubmit(event)">
+            <input type="hidden" id="mode" name="mode">
+
+            <!-- Item Selection -->
+            <div class="form-group" id="itemGroup">
+                <label id="itemLabel" for="itemId">項目を選択:</label>
+                <select id="itemId" name="itemId">
+                    <option value="" disabled selected>選択してください</option>
+                    <!-- Options will be populated by GAS -->
+                </select>
+            </div>
+
+            <!-- BOM Registration Fields -->
+            <div class="form-group hidden" id="bomProductGroup">
+                <label for="productId">商品を選択:</label>
+                <select id="productId" name="productId">
+                    <option value="" disabled selected>選択してください</option>
+                    <!-- Options will be populated by GAS -->
+                </select>
+            </div>
+
+            <div class="form-group hidden" id="bomMaterialsGroup">
+                <label>資材と必要数:</label>
+                <div id="bomMaterialsList">
+                    <!-- 資材フィールドが動的に追加される -->
+                </div>
+                <button type="button" id="addMaterialBtn" class="hidden" style="background-color: #2196F3; margin-top: 10px; width: auto; padding: 5px 15px;">
+                    資材を追加 (+)
+                </button>
+                <div id="maxMaterialsMsg" class="hidden" style="color: #666; font-size: 12px; margin-top: 5px;">
+                    最大8点まで登録できます
+                </div>
+            </div>
+
+            <!-- Quantity Selection -->
+            <div class="form-group" id="quantityGroup">
+                <label for="quantitySelect">数量:</label>
+                <select id="quantitySelect" name="quantitySelect" onchange="toggleCustomQty(this)">
+                    <option value="1">1</option>
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="custom">その他 (手入力)</option>
+                </select>
+            </div>
+
+            <!-- Custom Quantity Input -->
+            <div class="form-group hidden" id="customQtyGroup">
+                <label for="customQty">数量 (手入力):</label>
+                <input type="number" id="customQty" name="customQty" min="1">
+            </div>
+
+            <button type="submit">送信</button>
+        </form>
+    </div>
+
+    <script>
+        // Initialize form based on mode
+        function init(mode, dataList, dataList2) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('mainForm').classList.remove('hidden');
+            document.getElementById('mode').value = mode;
+
+            const title = document.getElementById('formTitle');
+            const itemLabel = document.getElementById('itemLabel');
+            const select = document.getElementById('itemId');
+            const productSelect = document.getElementById('productId');
+            const materialSelect = document.getElementById('materialId');
+            
+            // デバッグ用ログ
+            if (mode === 'REGISTER_BOM') {
+                console.log('BOM登録モード初期化');
+                console.log('productSelect:', productSelect);
+                console.log('dataList:', dataList);
+            }
+
+            // すべてのグループを初期状態にリセット
+            document.getElementById('itemGroup').style.display = 'block';
+            document.getElementById('bomProductGroup').classList.add('hidden');
+            document.getElementById('bomMaterialsGroup').classList.add('hidden');
+            document.getElementById('quantityGroup').style.display = 'block';
+            document.getElementById('customQtyGroup').classList.add('hidden');
+            
+            // BOM資材リストをクリア
+            document.getElementById('bomMaterialsList').innerHTML = '';
+
+            if (mode === 'ORDER_MATERIAL') {
+                title.textContent = '資材発注';
+                itemLabel.textContent = '資材を選択:';
+                // 資材リストを設定
+                if (dataList && dataList.length > 0 && select) {
+                    dataList.forEach(item => {
+                        if (item && item.id && item.name) {
+                            const option = document.createElement('option');
+                            option.value = item.id;
+                            option.textContent = item.name + ' (' + item.id + ')';
+                            select.appendChild(option);
+                        }
+                    });
+                } else {
+                    console.error('資材発注: 資材リストの設定に失敗', {
+                        dataList: dataList,
+                        select: select
+                    });
+                }
+            } else if (mode === 'RECEIVE_PRODUCT') {
+                title.textContent = '商品受注';
+                itemLabel.textContent = '商品を選択:';
+                // 商品リストを設定
+                if (dataList && dataList.length > 0 && select) {
+                    dataList.forEach(item => {
+                        if (item && item.id && item.name) {
+                            const option = document.createElement('option');
+                            option.value = item.id;
+                            option.textContent = item.name + ' (' + item.id + ')';
+                            select.appendChild(option);
+                        }
+                    });
+                } else {
+                    console.error('商品受注: 商品リストの設定に失敗', {
+                        dataList: dataList,
+                        select: select
+                    });
+                }
+            } else if (mode === 'MANUFACTURE_PRODUCT') {
+                title.textContent = '製造業者選択';
+                itemLabel.textContent = '製造業者を選択:';
+                // 数量選択を非表示
+                document.getElementById('quantityGroup').style.display = 'none';
+                document.getElementById('customQtyGroup').style.display = 'none';
+                // 製造業者リストを設定
+                if (dataList && dataList.length > 0 && select) {
+                    dataList.forEach(item => {
+                        if (item && item.id && item.name) {
+                            const option = document.createElement('option');
+                            option.value = item.id;
+                            option.textContent = item.name + ' (' + item.id + ')';
+                            select.appendChild(option);
+                        }
+                    });
+                } else {
+                    console.error('製造業者選択: 製造業者リストの設定に失敗', {
+                        dataList: dataList,
+                        select: select
+                    });
+                }
+            } else if (mode === 'REGISTER_BOM') {
+                title.textContent = 'BOM登録';
+                // 通常の項目選択を非表示
+                document.getElementById('itemGroup').style.display = 'none';
+                document.getElementById('quantityGroup').style.display = 'none';
+                document.getElementById('customQtyGroup').style.display = 'none';
+                // BOM登録用フィールドを表示
+                document.getElementById('bomProductGroup').classList.remove('hidden');
+                document.getElementById('bomMaterialsGroup').classList.remove('hidden');
+                document.getElementById('addMaterialBtn').classList.remove('hidden');
+                document.getElementById('maxMaterialsMsg').classList.remove('hidden');
+                
+                // フィールドを表示した後にproductSelectを再取得
+                // 少し遅延を入れてDOMが完全に更新されるのを待つ
+                setTimeout(function() {
+                    const productSelectAfter = document.getElementById('productId');
+                    
+                    // デバッグログ
+                    console.log('BOM登録モード - 商品リスト設定');
+                    console.log('dataList:', dataList);
+                    console.log('productSelectAfter:', productSelectAfter);
+                    
+                    if (productSelectAfter) {
+                        // 既存のオプションをクリア（disabled selectedのオプションを除く）
+                        while (productSelectAfter.options.length > 1) {
+                            productSelectAfter.remove(1);
+                        }
+                        
+                        // 商品リストを設定
+                        if (dataList && dataList.length > 0) {
+                            dataList.forEach(item => {
+                                if (item && item.id && item.name) {
+                                    const option = document.createElement('option');
+                                    option.value = item.id;
+                                    option.textContent = item.name + ' (' + item.id + ')';
+                                    productSelectAfter.appendChild(option);
+                                }
+                            });
+                            console.log('商品リストを設定しました:', productSelectAfter.options.length - 1, '件');
+                        } else {
+                            console.error('商品リストが空です');
+                            // エラーメッセージを表示
+                            const errorOption = document.createElement('option');
+                            errorOption.value = '';
+                            errorOption.textContent = '商品が見つかりません';
+                            errorOption.disabled = true;
+                            productSelectAfter.appendChild(errorOption);
+                        }
+                    } else {
+                        console.error('productSelect要素が見つかりません');
+                    }
+                }, 100);
+                
+                // 資材フィールドカウントをリセット
+                materialFieldCount = 0;
+                // 最初の資材フィールドを追加
+                addBomMaterialField(dataList2);
+                
+                // 資材追加ボタンのイベントリスナーを設定
+                setTimeout(function() {
+                    const addBtn = document.getElementById('addMaterialBtn');
+                    if (addBtn) {
+                        // 既存のイベントリスナーを削除
+                        const newBtn = addBtn.cloneNode(true);
+                        addBtn.parentNode.replaceChild(newBtn, addBtn);
+                        newBtn.addEventListener('click', function() {
+                            addBomMaterialField();
+                        });
+                    }
+                }, 150);
+            }
+
+            // すべてのモードでリストボックスが正しく設定されたか確認
+            if (mode !== 'REGISTER_BOM' && select) {
+                // REGISTER_BOM以外のモードで、select要素にオプションが追加されているか確認
+                const optionCount = select.options.length;
+                if (optionCount <= 1) {
+                    console.warn(`${mode}モード: リストボックスにオプションが設定されていません (オプション数: ${optionCount})`);
+                }
+            }
+        }
+
+        // BOM資材フィールドを追加
+        let materialOptions = [];
+        let materialFieldCount = 0;
+        const MAX_MATERIALS = 8;
+
+        function addBomMaterialField(materialList) {
+            if (materialFieldCount >= MAX_MATERIALS) {
+                alert('最大8点まで登録できます。');
+                return;
+            }
+
+            // 資材リストを保存（次回追加時に使用）
+            if (materialList && materialList.length > 0) {
+                materialOptions = materialList;
+            }
+
+            const materialsList = document.getElementById('bomMaterialsList');
+            if (!materialsList) {
+                console.error('bomMaterialsList要素が見つかりません');
+                return;
+            }
+
+            const fieldIndex = materialFieldCount;
+            materialFieldCount++;
+
+            const materialField = document.createElement('div');
+            materialField.className = 'form-group';
+            materialField.style.border = '1px solid #ddd';
+            materialField.style.padding = '10px';
+            materialField.style.marginBottom = '10px';
+            materialField.style.borderRadius = '4px';
+            materialField.id = `materialField_${fieldIndex}`;
+
+            materialField.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="flex: 3;">
+                        <label style="font-size: 12px; color: #666;">資材 ${fieldIndex + 1}:</label>
+                        <select class="bom-material-select" data-index="${fieldIndex}" style="width: 100%;">
+                            <option value="" disabled selected>選択してください</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="font-size: 12px; color: #666;">必要数:</label>
+                        <input type="number" class="bom-quantity-input" data-index="${fieldIndex}" min="0.01" step="0.01" style="width: 100%;" required>
+                    </div>
+                    <button type="button" class="remove-material-btn" data-index="${fieldIndex}" style="background-color: #f44336; color: white; padding: 6px 10px; margin-top: 20px; font-size: 12px; border: none; border-radius: 4px; cursor: pointer; flex-shrink: 0; width: 60px;">削除</button>
+                </div>
+            `;
+
+            materialsList.appendChild(materialField);
+
+            // 資材リストを設定
+            const select = materialField.querySelector('.bom-material-select');
+            if (select && materialOptions && materialOptions.length > 0) {
+                materialOptions.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.id;
+                    option.textContent = item.name + ' (' + item.id + ')';
+                    select.appendChild(option);
+                });
+            } else {
+                console.error('資材リストが設定されていません');
+            }
+
+            // 削除ボタンのイベント
+            const removeBtn = materialField.querySelector('.remove-material-btn');
+            removeBtn.addEventListener('click', function() {
+                materialField.remove();
+                materialFieldCount--;
+                updateMaterialFieldNumbers();
+                updateAddButton();
+            });
+
+            // 追加ボタンの表示/非表示を更新
+            updateAddButton();
+        }
+
+        function updateMaterialFieldNumbers() {
+            const fields = document.querySelectorAll('.bom-material-select');
+            fields.forEach((field, index) => {
+                const fieldDiv = field.closest('.form-group');
+                const label = fieldDiv.querySelector('label');
+                if (label) {
+                    label.textContent = `資材 ${index + 1}:`;
+                }
+                field.setAttribute('data-index', index);
+                const qtyInput = fieldDiv.querySelector('.bom-quantity-input');
+                const removeBtn = fieldDiv.querySelector('.remove-material-btn');
+                if (qtyInput) qtyInput.setAttribute('data-index', index);
+                if (removeBtn) removeBtn.setAttribute('data-index', index);
+                fieldDiv.id = `materialField_${index}`;
+            });
+        }
+
+        function updateAddButton() {
+            const addBtn = document.getElementById('addMaterialBtn');
+            if (addBtn) {
+                if (materialFieldCount >= MAX_MATERIALS) {
+                    addBtn.disabled = true;
+                    addBtn.style.opacity = '0.5';
+                    addBtn.style.cursor = 'not-allowed';
+                } else {
+                    addBtn.disabled = false;
+                    addBtn.style.opacity = '1';
+                    addBtn.style.cursor = 'pointer';
+                }
+            }
+        }
+
+        // Handle custom quantity toggle
+        function toggleCustomQty(select) {
+            const customGroup = document.getElementById('customQtyGroup');
+            const customInput = document.getElementById('customQty');
+
+            if (select.value === 'custom') {
+                customGroup.classList.remove('hidden');
+                customInput.required = true;
+            } else {
+                customGroup.classList.add('hidden');
+                customInput.required = false;
+            }
+        }
+
+        // Handle form submission
+        function handleSubmit(e) {
+            e.preventDefault();
+            const form = document.getElementById('dataForm');
+            const mode = form.mode.value;
+            const formData = {
+                mode: mode
+            };
+            
+            if (mode === 'REGISTER_BOM') {
+                // BOM登録モード
+                formData.productId = form.productId.value;
+                const materials = [];
+                const materialSelects = document.querySelectorAll('.bom-material-select');
+                const quantityInputs = document.querySelectorAll('.bom-quantity-input');
+                
+                materialSelects.forEach((select, index) => {
+                    const materialId = select.value;
+                    const quantity = quantityInputs[index] ? parseFloat(quantityInputs[index].value) : 0;
+                    if (materialId && quantity > 0) {
+                        materials.push({
+                            materialId: materialId,
+                            quantity: quantity
+                        });
+                    }
+                });
+                
+                if (materials.length === 0) {
+                    alert('少なくとも1つの資材を登録してください。');
+                    document.querySelector('button').disabled = false;
+                    document.querySelector('button').textContent = '送信';
+                    return;
+                }
+                
+                formData.materials = materials;
+            } else if (mode === 'MANUFACTURE_PRODUCT') {
+                // 製造業者選択モード
+                formData.itemId = form.itemId.value;
+            } else {
+                // その他のモード
+                formData.itemId = form.itemId.value;
+                formData.quantity = form.quantitySelect.value === 'custom' ? form.customQty.value : form.quantitySelect.value;
+            }
+
+            // Disable button to prevent double submit
+            const btn = form.querySelector('button');
+            btn.disabled = true;
+            btn.textContent = '送信中...';
+
+            google.script.run
+                .withSuccessHandler(onSuccess)
+                .withFailureHandler(showError)
+                .processForm(formData);
+        }
+
+        function onSuccess(result) {
+            if (result && result.message) {
+                alert(result.message);
+            }
+            google.script.host.close();
+        }
+
+        function showError(error) {
+            alert('エラーが発生しました: ' + error.message);
+            document.querySelector('button').disabled = false;
+            document.querySelector('button').textContent = '送信';
+        }
+
+        // 資材追加ボタンのイベントリスナー
+        // DOMContentLoadedとwindow.onloadの両方で設定を試みる
+        function setupAddMaterialButton() {
+            const addBtn = document.getElementById('addMaterialBtn');
+            if (addBtn) {
+                // 既存のイベントリスナーを削除してから追加
+                const newBtn = addBtn.cloneNode(true);
+                addBtn.parentNode.replaceChild(newBtn, addBtn);
+                newBtn.addEventListener('click', function() {
+                    addBomMaterialField();
+                });
+            }
+        }
+
+        // Load data from GAS on startup
+        window.onload = function () {
+            google.script.run
+                .withSuccessHandler(function (response) {
+                    init(response.mode, response.data, response.data2);
+                    // 初期化後にボタンのイベントリスナーを設定
+                    setTimeout(setupAddMaterialButton, 200);
+                })
+                .withFailureHandler(showError)
+                .getDialogData();
+        };
+    </script>
+</body>
+
+</html>

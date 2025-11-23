@@ -1,0 +1,43 @@
+# GAS 資材・売上管理システム .gitignore
+
+# システムファイル
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# エディタ設定ファイル（任意）
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 一時ファイル
+*.tmp
+*.log
+*.bak
+*.backup
+
+# 個人設定ファイル
+.env
+config.local.js
+
+# テストファイル（必要に応じて）
+test/
+tests/
+
+# ドキュメントの一時ファイル
+*.docx
+*.xlsx
+*.pptx
+
+# 圧縮ファイル（必要に応じて）
+*.zip
+*.tar.gz
+*.rar
+
+# メモファイル
+notes.txt
+todo.txt
+scratch.md
+
