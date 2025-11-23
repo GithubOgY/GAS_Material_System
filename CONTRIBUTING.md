@@ -1,3 +1,6 @@
+   git config --global user.name "GithubOgY"
+   git config --global user.email "yukayohei@gmail.com"
+
 # コントリビューションガイド
 
 このプロジェクトへの貢献を検討していただき、ありがとうございます。このガイドは、開発に参加する際のルールとベストプラクティスを説明します。
