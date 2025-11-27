@@ -142,8 +142,9 @@ function getProductListForOrder() {
     for (let i = 1; i < values.length; i++) {
       const productId = values[i][0];
       const productName = values[i][1];
-      // 商品番号（D列）がある場合は使用、ない場合は商品IDを使用
-      const productNumber = values[i][3] ? String(values[i][3]).trim() : String(productId).trim();
+      // 商品番号（E列）がある場合は使用、ない場合は商品IDを使用
+      // Productsシート構造: A=ProductID, B=ProductName, C=SellingPrice, D=伝票単価, E=ProductNumber
+      const productNumber = values[i][4] ? String(values[i][4]).trim() : String(productId).trim();
       
       if (productId && productName) {
         list.push({
@@ -207,24 +208,50 @@ function processForm(form) {
     return registerBOM(form.productId, form.materials);
   }
 
-  if (!form.quantity) {
-    throw new Error('数量が指定されていません。');
-  }
-  
-  const qty = parseInt(form.quantity);
-  if (isNaN(qty) || qty <= 0) {
-    throw new Error('数量が不正です。');
-  }
-
   if (form.mode === 'ORDER_MATERIAL') {
-    if (!form.itemId) {
+    if (!form.materialOrders || !Array.isArray(form.materialOrders) || form.materialOrders.length === 0) {
       throw new Error('資材が選択されていません。');
     }
+    
     const sheet = getSheet(SHEET_NAMES.MAT_ORDERS);
-    const orderId = generateId('MO');
     const date = new Date();
-    sheet.appendRow([orderId, date, form.itemId, qty, 'Ordered']);
-    return { message: `発注完了: ${orderId}` };
+    // 受領予定日がある場合は取得、ない場合は空文字列
+    const expectedReceiptDate = form.expectedReceiptDate || '';
+    
+    const orderIds = [];
+    let successCount = 0;
+    
+    // 各資材を発注
+    for (const materialOrder of form.materialOrders) {
+      if (!materialOrder.materialId || !materialOrder.quantity) {
+        continue;
+      }
+      
+      const orderId = generateId('MO');
+      const qty = parseInt(materialOrder.quantity);
+      
+      if (isNaN(qty) || qty <= 0) {
+        continue;
+      }
+      
+      // 資材名を取得
+      const materialName = getMaterialName(materialOrder.materialId) || '';
+      // Material_Ordersシートの構造: OrderID, Date, MaterialID, MaterialName, Quantity, Status, ExpectedReceiptDate
+      sheet.appendRow([orderId, date, materialOrder.materialId, materialName, qty, 'Ordered', expectedReceiptDate]);
+      orderIds.push(orderId);
+      successCount++;
+    }
+    
+    if (successCount === 0) {
+      throw new Error('有効な資材発注がありませんでした。');
+    }
+    
+    const receiptDateMsg = expectedReceiptDate ? `\n受領予定日: ${expectedReceiptDate}` : '';
+    const orderIdsMsg = orderIds.length <= 3 
+      ? orderIds.join(', ') 
+      : `${orderIds.slice(0, 3).join(', ')} 他${orderIds.length - 3}件`;
+    
+    return { message: `発注完了: ${successCount}件\n発注ID: ${orderIdsMsg}${receiptDateMsg}` };
     
   } else if (form.mode === 'RECEIVE_PRODUCT') {
     // 新仕様: 相手先の発注番号、商品番号、商品名、数量、納期を受け取る
@@ -239,8 +266,8 @@ function processForm(form) {
     const qty = parseInt(form.quantity);
     const deliveryDate = form.deliveryDate;
     
-    if (!/^[0-9]{6}$/.test(clientOrderNumber)) {
-      throw new Error('相手先の発注番号は6桁の数字で入力してください。');
+    if (!/^[0-9]{7}$/.test(clientOrderNumber)) {
+      throw new Error('相手先の発注番号は7桁の数字で入力してください。');
     }
     if (!/^[0-9]{6}$/.test(productNumber)) {
       throw new Error('商品番号は6桁の数字で入力してください。');
@@ -358,19 +385,20 @@ function menuReceiveMaterial() {
     return;
   }
 
-  const status = sheet.getRange(row, 5).getValue();
+  // Material_Ordersシートの構造: OrderID, Date, MaterialID, MaterialName, Quantity, Status, ExpectedReceiptDate
+  const status = sheet.getRange(row, 6).getValue(); // F列（Status）
   if (status === 'Received') {
     showAlert('この発注は既に受領済みです。');
     return;
   }
 
-  const matId = sheet.getRange(row, 3).getValue();
+  const matId = sheet.getRange(row, 3).getValue(); // C列（MaterialID）
   if (!matId) {
     showAlert('資材IDが取得できませんでした。');
     return;
   }
 
-  const qty = Number(sheet.getRange(row, 4).getValue());
+  const qty = Number(sheet.getRange(row, 5).getValue()); // E列（Quantity）
   
   if (isNaN(qty) || qty <= 0) {
     showAlert('数量が不正です。');
@@ -379,7 +407,7 @@ function menuReceiveMaterial() {
 
   updateStock(matId, qty);
 
-  sheet.getRange(row, 5).setValue('Received');
+  sheet.getRange(row, 6).setValue('Received'); // F列（Status）
   
   // Shortage状態の受注をチェックして、在庫が十分になったらOrderedに戻す
   const resolvedOrders = checkAndResolveShortageOrders();
@@ -794,12 +822,13 @@ function getProductIdByNumber(productNumber) {
     const data = sheet.getDataRange().getValues();
     const normalizedProductNumber = String(productNumber).trim();
     
-    // 商品マスタに商品番号の列がある場合（D列を想定）
+    // 商品マスタに商品番号の列がある場合（E列を想定）
+    // Productsシート構造: A=ProductID, B=ProductName, C=SellingPrice, D=伝票単価, E=ProductNumber
     // もし商品番号の列がない場合は、商品IDを商品番号として扱う
     for (let i = 1; i < data.length; i++) {
       const productId = String(data[i][0]).trim();
-      // 商品番号の列がある場合（D列）
-      if (data[i][3] && String(data[i][3]).trim() === normalizedProductNumber) {
+      // 商品番号の列がある場合（E列）
+      if (data[i][4] && String(data[i][4]).trim() === normalizedProductNumber) {
         return productId;
       }
       // 商品IDが商品番号と一致する場合（後方互換性のため）
@@ -810,6 +839,33 @@ function getProductIdByNumber(productNumber) {
     return null;
   } catch (error) {
     Logger.log(`getProductIdByNumber エラー: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * 資材名を取得する
+ * @param {string} matId - 資材ID
+ * @return {string|null} 資材名、見つからない場合はnull
+ */
+function getMaterialName(matId) {
+  if (!matId) {
+    return null;
+  }
+  
+  try {
+    const sheet = getSheet(SHEET_NAMES.MATERIALS);
+    const data = sheet.getDataRange().getValues();
+    const normalizedMatId = String(matId).trim();
+    
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === normalizedMatId) {
+        return data[i][1] ? String(data[i][1]).trim() : null;
+      }
+    }
+    return null;
+  } catch (error) {
+    Logger.log(`getMaterialName エラー: ${error.message}`);
     return null;
   }
 }
@@ -1034,5 +1090,81 @@ function registerBOM(productId, materials) {
   } catch (error) {
     Logger.log(`registerBOM エラー: ${error.message}`);
     throw new Error(`BOM登録エラー: ${error.message}`);
+  }
+}
+
+/**
+ * 受注日のリストを取得する（納期回答書作成用）
+ * @return {Array<Object>} 受注日のリスト（id, nameを含む）
+ */
+function getOrderDatesList() {
+  try {
+    const sheet = getSheet(SHEET_NAMES.PROD_ORDERS);
+    const data = sheet.getDataRange().getValues();
+    const dates = new Set();
+    
+    // 2行目以降をチェック（1行目はヘッダー）
+    for (let i = 1; i < data.length; i++) {
+      const date = data[i][1]; // B列（Date）
+      if (date) {
+        // 日付をYYYY-MM-DD形式に変換
+        const dateObj = new Date(date);
+        if (!isNaN(dateObj.getTime())) {
+          const dateStr = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          dates.add(dateStr);
+        }
+      }
+    }
+    
+    // 日付を降順でソート
+    const sortedDates = Array.from(dates).sort().reverse();
+    
+    return sortedDates.map(date => ({
+      id: date,
+      name: date
+    }));
+  } catch (error) {
+    Logger.log(`getOrderDatesList エラー: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * 指定した受注日の受注データを取得する（納期回答書作成用）
+ * @param {string} orderDate - 受注日（YYYY-MM-DD形式）
+ * @return {Array<Object>} 受注データの配列
+ */
+function getOrdersByDate(orderDate) {
+  try {
+    const sheet = getSheet(SHEET_NAMES.PROD_ORDERS);
+    const data = sheet.getDataRange().getValues();
+    const orders = [];
+    
+    // 2行目以降をチェック（1行目はヘッダー）
+    // 新しい構造: A=OrderID, B=Date, C=ClientOrderNumber, D=ProductNumber, E=ProductName, F=Quantity, G=DeliveryDate, H=Status, I=Manufacturer
+    for (let i = 1; i < data.length; i++) {
+      const date = data[i][1]; // B列（Date）
+      if (date) {
+        const dateObj = new Date(date);
+        if (!isNaN(dateObj.getTime())) {
+          const dateStr = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          if (dateStr === orderDate) {
+            orders.push({
+              orderId: data[i][0] || '',
+              clientOrderNumber: data[i][2] || '',
+              productNumber: data[i][3] || '',
+              productName: data[i][4] || '',
+              quantity: Number(data[i][5]) || 0,
+              deliveryDate: data[i][6] || ''
+            });
+          }
+        }
+      }
+    }
+    
+    return orders;
+  } catch (error) {
+    Logger.log(`getOrdersByDate エラー: ${error.message}`);
+    return [];
   }
 }
