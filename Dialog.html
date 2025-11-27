@@ -70,6 +70,20 @@
                 </select>
             </div>
 
+            <!-- Material Order Fields (資材発注専用) -->
+            <div class="form-group hidden" id="materialOrderFields">
+                <label>資材と数量:</label>
+                <div id="materialOrderList">
+                    <!-- 資材フィールドが動的に追加される -->
+                </div>
+                <button type="button" id="addMaterialOrderBtn" class="hidden" style="background-color: #2196F3; margin-top: 10px; width: auto; padding: 5px 15px;">
+                    資材を追加 (+)
+                </button>
+                <div id="maxMaterialOrdersMsg" class="hidden" style="color: #666; font-size: 12px; margin-top: 5px;">
+                    最大10点まで発注できます
+                </div>
+            </div>
+
             <!-- BOM Registration Fields -->
             <div class="form-group hidden" id="bomProductGroup">
                 <label for="productId">商品を選択:</label>
@@ -94,8 +108,8 @@
 
             <!-- Product Order Fields (商品受注専用) -->
             <div class="form-group hidden" id="productOrderFields">
-                <label for="clientOrderNumber">相手先の発注番号 (6桁の数字):</label>
-                <input type="text" id="clientOrderNumber" name="clientOrderNumber" pattern="[0-9]{6}" maxlength="6" placeholder="例: 123456">
+                <label for="clientOrderNumber">相手先の発注番号 (7桁の数字):</label>
+                <input type="text" id="clientOrderNumber" name="clientOrderNumber" pattern="[0-9]{7}" maxlength="7" placeholder="例: 1234567">
                 
                 <label for="productNameSelect" style="margin-top: 15px;">商品名を選択:</label>
                 <select id="productNameSelect" name="productNameSelect" onchange="onProductNameSelected(this)">
@@ -137,6 +151,12 @@
                 <input type="number" id="customQty" name="customQty" min="1">
             </div>
 
+            <!-- Expected Receipt Date (資材発注専用) -->
+            <div class="form-group hidden" id="expectedReceiptDateGroup">
+                <label for="expectedReceiptDate">受領予定日:</label>
+                <input type="date" id="expectedReceiptDate" name="expectedReceiptDate">
+            </div>
+
             <!-- Delivery Response Fields (納期回答書作成専用) -->
             <div class="form-group hidden" id="deliveryResponseFields">
                 <label for="orderDateSelect">受注日を選択:</label>
@@ -167,27 +187,55 @@
             document.getElementById('bomMaterialsGroup').classList.add('hidden');
             document.getElementById('productOrderFields').classList.add('hidden');
             document.getElementById('deliveryResponseFields').classList.add('hidden');
+            document.getElementById('materialOrderFields').classList.add('hidden');
             document.getElementById('quantityGroup').style.display = 'block';
             document.getElementById('customQtyGroup').classList.add('hidden');
+            document.getElementById('expectedReceiptDateGroup').classList.add('hidden');
             
             // BOM資材リストをクリア
             document.getElementById('bomMaterialsList').innerHTML = '';
+            // 資材発注リストをクリア
+            const materialOrderList = document.getElementById('materialOrderList');
+            if (materialOrderList) {
+                materialOrderList.innerHTML = '';
+            }
 
             if (mode === 'ORDER_MATERIAL') {
                 title.textContent = '資材発注';
-                itemLabel.textContent = '資材を選択:';
-                // 資材リストを設定
-                if (dataList && dataList.length > 0 && select) {
-                    dataList.forEach(item => {
-                        if (item && item.id && item.name) {
-                            const option = document.createElement('option');
-                            option.value = item.id;
-                            option.textContent = item.name + ' (' + item.id + ')';
-                            select.appendChild(option);
-                        }
-                    });
+                // 通常の項目選択を非表示
+                document.getElementById('itemGroup').style.display = 'none';
+                // 資材発注専用フィールドを表示
+                document.getElementById('materialOrderFields').classList.remove('hidden');
+                document.getElementById('addMaterialOrderBtn').classList.remove('hidden');
+                document.getElementById('maxMaterialOrdersMsg').classList.remove('hidden');
+                // 受領予定日フィールドを表示
+                document.getElementById('expectedReceiptDateGroup').classList.remove('hidden');
+                // 数量選択を非表示（資材発注では各資材ごとに数量を入力）
+                document.getElementById('quantityGroup').style.display = 'none';
+                document.getElementById('customQtyGroup').style.display = 'none';
+                
+                // 資材リストをグローバル変数に保存
+                if (dataList && dataList.length > 0) {
+                    window.materialOrderList = dataList;
                 } else {
                     console.error('資材発注: 資材リストの設定に失敗');
+                    window.materialOrderList = [];
+                }
+                
+                // 資材発注フィールドカウントをリセット
+                materialOrderFieldCount = 0;
+                // 最初の資材フィールドを追加
+                addMaterialOrderField(dataList);
+                
+                // 資材追加ボタンのイベントリスナーを設定
+                const addBtn = document.getElementById('addMaterialOrderBtn');
+                if (addBtn) {
+                    // 既存のイベントリスナーを削除してから追加
+                    const newBtn = addBtn.cloneNode(true);
+                    addBtn.parentNode.replaceChild(newBtn, addBtn);
+                    newBtn.addEventListener('click', function() {
+                        addMaterialOrderField();
+                    });
                 }
             } else if (mode === 'RECEIVE_PRODUCT') {
                 title.textContent = '商品受注';
@@ -241,6 +289,7 @@
                 document.getElementById('itemGroup').style.display = 'none';
                 document.getElementById('quantityGroup').style.display = 'none';
                 document.getElementById('customQtyGroup').style.display = 'none';
+                document.getElementById('expectedReceiptDateGroup').classList.add('hidden');
                 // BOM登録用フィールドを表示
                 document.getElementById('bomProductGroup').classList.remove('hidden');
                 document.getElementById('bomMaterialsGroup').classList.remove('hidden');
@@ -329,6 +378,115 @@
         let materialOptions = [];
         let materialFieldCount = 0;
         const MAX_MATERIALS = 8;
+
+        // 資材発注フィールドを追加
+        let materialOrderOptions = [];
+        let materialOrderFieldCount = 0;
+        const MAX_MATERIAL_ORDERS = 10;
+
+        function addMaterialOrderField(materialList) {
+            if (materialOrderFieldCount >= MAX_MATERIAL_ORDERS) {
+                alert('最大10点まで発注できます。');
+                return;
+            }
+
+            // 資材リストを保存（次回追加時に使用）
+            if (materialList && materialList.length > 0) {
+                materialOrderOptions = materialList;
+            }
+
+            const materialOrderList = document.getElementById('materialOrderList');
+            if (!materialOrderList) {
+                console.error('materialOrderList要素が見つかりません');
+                return;
+            }
+
+            const fieldIndex = materialOrderFieldCount;
+            materialOrderFieldCount++;
+
+            const materialField = document.createElement('div');
+            materialField.className = 'form-group';
+            materialField.style.border = '1px solid #ddd';
+            materialField.style.padding = '10px';
+            materialField.style.marginBottom = '10px';
+            materialField.style.borderRadius = '4px';
+            materialField.id = `materialOrderField_${fieldIndex}`;
+
+            materialField.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="flex: 3;">
+                        <label style="font-size: 12px; color: #666;">資材 ${fieldIndex + 1}:</label>
+                        <select class="material-order-select" data-index="${fieldIndex}" style="width: 100%;" required>
+                            <option value="" disabled selected>選択してください</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="font-size: 12px; color: #666;">数量:</label>
+                        <input type="number" class="material-order-quantity-input" data-index="${fieldIndex}" min="1" step="1" style="width: 100%;" required>
+                    </div>
+                    <button type="button" class="remove-material-order-btn" data-index="${fieldIndex}" style="background-color: #f44336; color: white; padding: 6px 10px; margin-top: 20px; font-size: 12px; border: none; border-radius: 4px; cursor: pointer; flex-shrink: 0; width: 60px;">削除</button>
+                </div>
+            `;
+
+            materialOrderList.appendChild(materialField);
+
+            // 資材リストを設定
+            const select = materialField.querySelector('.material-order-select');
+            if (select && materialOrderOptions && materialOrderOptions.length > 0) {
+                materialOrderOptions.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.id;
+                    option.textContent = item.name + ' (' + item.id + ')';
+                    select.appendChild(option);
+                });
+            } else if (materialOrderOptions.length === 0) {
+                console.error('資材リストが設定されていません');
+            }
+
+            // 削除ボタンのイベント
+            const removeBtn = materialField.querySelector('.remove-material-order-btn');
+            removeBtn.addEventListener('click', function() {
+                materialField.remove();
+                materialOrderFieldCount--;
+                updateMaterialOrderFieldNumbers();
+                updateMaterialOrderAddButton();
+            });
+
+            // 追加ボタンの表示/非表示を更新
+            updateMaterialOrderAddButton();
+        }
+
+        function updateMaterialOrderFieldNumbers() {
+            const fields = document.querySelectorAll('.material-order-select');
+            fields.forEach((field, index) => {
+                const fieldDiv = field.closest('.form-group');
+                const label = fieldDiv.querySelector('label');
+                if (label) {
+                    label.textContent = `資材 ${index + 1}:`;
+                }
+                field.setAttribute('data-index', index);
+                const qtyInput = fieldDiv.querySelector('.material-order-quantity-input');
+                const removeBtn = fieldDiv.querySelector('.remove-material-order-btn');
+                if (qtyInput) qtyInput.setAttribute('data-index', index);
+                if (removeBtn) removeBtn.setAttribute('data-index', index);
+                fieldDiv.id = `materialOrderField_${index}`;
+            });
+        }
+
+        function updateMaterialOrderAddButton() {
+            const addBtn = document.getElementById('addMaterialOrderBtn');
+            if (addBtn) {
+                if (materialOrderFieldCount >= MAX_MATERIAL_ORDERS) {
+                    addBtn.disabled = true;
+                    addBtn.style.opacity = '0.5';
+                    addBtn.style.cursor = 'not-allowed';
+                } else {
+                    addBtn.disabled = false;
+                    addBtn.style.opacity = '1';
+                    addBtn.style.cursor = 'pointer';
+                }
+            }
+        }
 
         function addBomMaterialField(materialList) {
             if (materialFieldCount >= MAX_MATERIALS) {
@@ -476,31 +634,76 @@
                 return;
             }
             
-            const productNumber = input.value.trim();
+            // 商品番号を6桁にパディング（先頭0を保持）
+            let productNumber = input.value.trim();
+            // 数字のみを抽出
+            productNumber = productNumber.replace(/[^0-9]/g, '');
+            // 6桁にパディング（先頭に0を追加）
+            if (productNumber.length < 6) {
+                productNumber = productNumber.padStart(6, '0');
+            }
+            // 6桁を超える場合は先頭6桁のみ使用
+            if (productNumber.length > 6) {
+                productNumber = productNumber.substring(0, 6);
+            }
+            
+            // 入力フィールドに正規化した値を設定
+            if (input.value.trim() !== productNumber) {
+                input.value = productNumber;
+            }
+            
+            // 6桁未満の場合は商品名を設定しない（入力途中の可能性があるため）
+            if (productNumber.length < 6) {
+                return;
+            }
+            
             const productList = window.productList || [];
             
-            // 商品番号で検索
+            if (productList.length === 0) {
+                console.warn('商品リストが読み込まれていません');
+                return;
+            }
+            
+            // 商品番号で検索（正規化して比較）
+            const normalizedSearchNumber = productNumber.padStart(6, '0');
             const product = productList.find(item => {
-                return item.productNumber && String(item.productNumber).trim() === productNumber;
+                if (!item.productNumber) {
+                    return false;
+                }
+                // 両方の商品番号を6桁にパディングして比較
+                const itemNumber = String(item.productNumber).trim().padStart(6, '0');
+                return itemNumber === normalizedSearchNumber;
             });
             
-            if (product) {
+            if (product && product.productName) {
                 // 商品名を自動入力
                 const productNameInput = document.getElementById('productName');
                 if (productNameInput) {
                     productNameInput.value = product.productName;
+                    // 入力イベントを発火して、値が設定されたことを確認
+                    productNameInput.dispatchEvent(new Event('input', { bubbles: true }));
                 }
                 
-                // 商品名リストボックスも更新
+                // 商品名リストボックスも更新（商品番号を正規化して検索）
                 const productNameSelect = document.getElementById('productNameSelect');
                 if (productNameSelect) {
-                    productNameSelect.value = productNumber;
+                    // オプションの中から一致するものを探す
+                    for (let i = 0; i < productNameSelect.options.length; i++) {
+                        const option = productNameSelect.options[i];
+                        const optionValue = String(option.value).trim().padStart(6, '0');
+                        if (optionValue === normalizedSearchNumber) {
+                            productNameSelect.selectedIndex = i;
+                            break;
+                        }
+                    }
                 }
             } else {
-                // 商品が見つからない場合は商品名をクリア
+                // 商品が見つからない場合は商品名をクリアしない（手入力の可能性があるため）
+                // ただし、商品番号が6桁で完全な場合は警告を表示
                 const productNameInput = document.getElementById('productName');
-                if (productNameInput) {
-                    productNameInput.value = '';
+                if (productNameInput && !productNameInput.value.trim()) {
+                    // 商品名が空の場合のみ警告（手入力されている場合は警告しない）
+                    console.warn(`商品番号 "${productNumber}" に対応する商品が見つかりませんでした`);
                 }
             }
         }
@@ -556,8 +759,8 @@
             } else if (mode === 'RECEIVE_PRODUCT') {
                 // 商品受注モード
                 const clientOrderNumber = form.clientOrderNumber.value.trim();
-                const productNumber = form.productNumber.value.trim();
-                const productName = form.productName.value.trim();
+                let productNumber = form.productNumber.value.trim();
+                let productName = form.productName.value.trim();
                 const deliveryDate = form.deliveryDate.value;
                 
                 // バリデーション
@@ -565,8 +768,8 @@
                     alert('相手先の発注番号を入力してください。');
                     return;
                 }
-                if (!/^[0-9]{6}$/.test(clientOrderNumber)) {
-                    alert('相手先の発注番号は6桁の数字で入力してください。');
+                if (!/^[0-9]{7}$/.test(clientOrderNumber)) {
+                    alert('相手先の発注番号は7桁の数字で入力してください。');
                     return;
                 }
                 
@@ -574,14 +777,43 @@
                     alert('商品番号を入力してください。');
                     return;
                 }
+                
+                // 商品番号を6桁に正規化
+                productNumber = productNumber.replace(/[^0-9]/g, '');
+                if (productNumber.length < 6) {
+                    productNumber = productNumber.padStart(6, '0');
+                }
+                if (productNumber.length > 6) {
+                    productNumber = productNumber.substring(0, 6);
+                }
+                
                 if (!/^[0-9]{6}$/.test(productNumber)) {
                     alert('商品番号は6桁の数字で入力してください。');
                     return;
                 }
                 
+                // 商品名が空の場合、商品番号から商品名を取得
                 if (!productName) {
-                    alert('商品名を入力してください。');
-                    return;
+                    const productList = window.productList || [];
+                    const product = productList.find(item => {
+                        if (!item.productNumber) {
+                            return false;
+                        }
+                        const itemNumber = String(item.productNumber).trim().padStart(6, '0');
+                        return itemNumber === productNumber;
+                    });
+                    
+                    if (product && product.productName) {
+                        productName = product.productName;
+                        // 商品名フィールドに設定
+                        const productNameInput = document.getElementById('productName');
+                        if (productNameInput) {
+                            productNameInput.value = productName;
+                        }
+                    } else {
+                        alert('商品番号に対応する商品が見つかりません。商品名を手入力してください。');
+                        return;
+                    }
                 }
                 
                 if (!deliveryDate) {
@@ -612,22 +844,30 @@
                 formData.orderDate = orderDate;
             } else {
                 // 資材発注モード
-                const itemId = form.itemId.value;
-                if (!itemId) {
-                    alert('資材を選択してください。');
+                const materialOrders = [];
+                const materialSelects = document.querySelectorAll('.material-order-select');
+                const quantityInputs = document.querySelectorAll('.material-order-quantity-input');
+                
+                materialSelects.forEach((select, index) => {
+                    const materialId = select.value;
+                    const quantity = quantityInputs[index] ? parseInt(quantityInputs[index].value) : 0;
+                    if (materialId && quantity > 0) {
+                        materialOrders.push({
+                            materialId: materialId,
+                            quantity: quantity
+                        });
+                    }
+                });
+                
+                if (materialOrders.length === 0) {
+                    alert('少なくとも1つの資材を発注してください。');
                     return;
                 }
                 
-                let quantity = form.quantitySelect.value === 'custom' ? form.customQty.value : form.quantitySelect.value;
-                quantity = parseInt(quantity);
+                const expectedReceiptDate = form.expectedReceiptDate ? form.expectedReceiptDate.value : '';
                 
-                if (isNaN(quantity) || quantity <= 0) {
-                    alert('数量は1以上の整数を入力してください。');
-                    return;
-                }
-                
-                formData.itemId = itemId;
-                formData.quantity = quantity;
+                formData.materialOrders = materialOrders;
+                formData.expectedReceiptDate = expectedReceiptDate;
             }
 
             // Disable button to prevent double submit
