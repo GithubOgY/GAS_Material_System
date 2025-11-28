@@ -258,88 +258,66 @@ Google Apps Script (GAS) を使用した資材・売上管理システムの開�
 
 ---
 
-#### 14. 発注番号の桁数変更（6桁→7桁）
-**日付**: 2024年  
-**目的**: 相手先の発注番号を6桁から7桁に変更  
-**変更内容**:
-- `Code.gs`: `processForm`関数内のバリデーションを`^[0-9]{6}$`から`^[0-9]{7}$`に変更
-- `Dialog.html`: 発注番号入力欄の`pattern`属性と`maxlength`属性を7桁に変更
-- `Dialog.html`: JavaScriptのバリデーションとエラーメッセージを7桁に更新
-- `sheets_structure.md`: ドキュメントを7桁に更新
-
-**影響範囲**: 
-- `Code.gs` - `processForm`関数
-- `Dialog.html` - 商品受注フォーム
-- `sheets_structure.md` - ドキュメント更新
-
----
-
-#### 15. 商品番号入力時の自動補完機能の改善
-**日付**: 2024年  
-**目的**: 商品番号を入力した際に商品名が自動選択されない問題を修正  
-**変更内容**:
-- `Dialog.html`: `onProductNumberInput`関数を改善
-  - 商品番号を6桁にパディング（先頭0を保持）
-  - 商品番号の比較時に両方を6桁にパディングして比較
-  - 商品名リストボックスの選択処理を改善
-- `Dialog.html`: フォーム送信時に商品名が空の場合、商品番号から商品名を自動取得する処理を追加
-
-**影響範囲**: 
-- `Dialog.html` - 商品受注フォームの自動補完機能
-
----
-
-#### 16. Productsシート構造の変更対応
-**日付**: 2024年  
-**目的**: Productsシートに伝票単価列（D列）を追加し、商品番号をE列に移動  
-**変更内容**:
-- `Code.gs`: `getProductListForOrder`関数で商品番号の取得を`values[i][3]`（D列）から`values[i][4]`（E列）に変更
-- `Code.gs`: `getProductIdByNumber`関数で商品番号の検索を`data[i][3]`（D列）から`data[i][4]`（E列）に変更
-- `sheets_structure.md`: Productsシートの構造を更新
-  - A列: ProductID
-  - B列: ProductName
-  - C列: SellingPrice
-  - D列: 伝票単価（新規追加）
-  - E列: ProductNumber
-
-**影響範囲**: 
-- `Code.gs` - 商品番号を参照する関数
-- `sheets_structure.md` - ドキュメント更新
-
----
-
-#### 17. 資材発注時に受領予定日を入力できる機能の追加
-**日付**: 2024年  
-**目的**: 資材発注時に受領予定日を入力できるようにする  
+#### 15. 不足資材ログ機能の追加
+**日付**: 2024年12月  
+**目的**: 商品受注時に不足している資材を記録し、確認できるようにする  
 **追加内容**:
-- `Dialog.html`: 資材発注フォームに「受領予定日」の日付入力欄を追加
-- `Dialog.html`: 資材発注モードでのみ受領予定日フィールドを表示
-- `Code.gs`: `processForm`関数で受領予定日を受け取り、Material_OrdersシートのF列（後にG列に変更）に記録
-- `sheets_structure.md`: Material_Ordersシートの構造を更新（F列にExpectedReceiptDateを追加）
+- 新しいシート「Shortage_Log」を追加
+- `SHEET_NAMES`に`SHORTAGE_LOG`を追加
+- `recordShortageMaterials`: 不足資材を記録する関数を追加
+- `menuShowShortage`: 選択した受注の不足資材を表示するメニュー機能を追加
+- `removeShortageLog`: 不足資材ログから指定した受注IDの記録を削除する関数を追加
+- `updateShortageLog`: 不足資材ログを更新する関数を追加
+- `processForm`: 商品受注時に不足資材がある場合、Shortage_Logに記録
+- `checkAndResolveShortageOrders`: 在庫が解決された場合、Shortage_Logを更新
+- Shortage_Logシートのヘッダーを日本語化（受注ID、商品ID、商品番号、商品名、受注数量、資材ID、資材名、必要数量、現在庫、不足数量、記録日）
 
 **影響範囲**: 
-- `Code.gs` - `processForm`関数
-- `Dialog.html` - 資材発注フォーム
-- `sheets_structure.md` - ドキュメント更新
+- `Code.gs` - 不足資材ログ関連の関数を追加
+- メニューに「8. 不足資材を確認する (選択行)」を追加
 
 ---
 
-#### 18. 資材発注時に資材名を記録する機能の追加
-**日付**: 2024年  
-**目的**: 資材発注時に資材IDの隣に資材名を記録する  
+#### 16. 資材受領時の先入先出処理
+**日付**: 2024年12月  
+**目的**: 資材を受領した際に、Shortage_Logを先入先出（FIFO）で更新・削除する  
 **追加内容**:
-- `Code.gs`: `getMaterialName`関数を追加（資材IDから資材名を取得）
-- `Code.gs`: `processForm`関数で資材発注時に資材名を取得し、Material_OrdersシートのD列に記録
-- `Code.gs`: `menuReceiveMaterial`関数の列番号を修正
-  - Status: E列（5列目）→ F列（6列目）
-  - Quantity: D列（4列目）→ E列（5列目）
-- `sheets_structure.md`: Material_Ordersシートの構造を更新
-  - D列にMaterialName（資材名）を追加
-  - 以降の列が1列ずつシフト
+- `updateShortageLogFIFO`: 資材受領時にShortage_Logを先入先出で更新する関数を追加
+- `menuReceiveMaterial`: 資材受領時に`updateShortageLogFIFO`を呼び出し
+- 日付順（古い順）でソートし、受領数量を古い受注から順に割り当て
+- 不足数量が0になった受注は、その受注の他の不足資材も確認し、すべて解決されていればログから削除
+- 資材IDの比較処理を改善（大文字統一、数値比較対応）
 
 **影響範囲**: 
-- `Code.gs` - `processForm`関数、`menuReceiveMaterial`関数、`getMaterialName`関数追加
-- `sheets_structure.md` - ドキュメント更新
+- `Code.gs` - `updateShortageLogFIFO`関数の追加、`menuReceiveMaterial`の修正
+
+---
+
+#### 17. 商品納品後のデータ削除機能
+**日付**: 2024年12月  
+**目的**: 商品を納品した後、Product_Ordersシートからデータを削除する  
+**変更内容**:
+- `menuDeliverProduct`: 納品完了後、Product_Ordersシートから該当行を削除
+- 納品完了時、Shortage_Logからも該当する受注IDの記録を削除
+- メッセージに「Product_Ordersシートから削除しました」を追加
+
+**影響範囲**: 
+- `Code.gs` - `menuDeliverProduct`関数の修正
+
+---
+
+#### 18. 製造時の在庫引き落とし処理の修正
+**日付**: 2024年12月  
+**問題**: 商品を製造した際、Materialsシートの在庫から使用された資材の数量が差し引かれていなかった  
+**原因**: `processManufacture`関数で列番号の参照が間違っていた  
+**修正内容**:
+- `processManufacture`: 商品番号をD列から取得し、商品IDに変換する処理を追加
+- 数量をF列（Quantity）から正しく取得するように修正
+- 商品番号と数量のバリデーションを追加
+- BOMデータの存在チェックを追加
+
+**影響範囲**: 
+- `Code.gs` - `processManufacture`関数の修正
 
 ---
 
@@ -364,66 +342,5 @@ Google Apps Script (GAS) を使用した資材・売上管理システムの開�
 
 ## バージョン情報
 
-- **バージョン**: 1.2
-- **最終更新日**: 2024年
-- **主要機能**: 資材管理、商品管理、BOM管理、売上管理、製造業者管理、納期回答書作成
-
-### バージョン1.2の主な変更点
-1. 資材発注機能を複数品目対応に拡張（最大10品目）
-2. 資材発注機能のバグ修正（数量チェック、変数重複宣言）
-
-### バージョン1.1の主な変更点
-1. 発注番号を6桁から7桁に変更
-2. 商品番号入力時の自動補完機能を改善
-3. Productsシート構造の変更に対応（伝票単価列の追加）
-4. 資材発注時に受領予定日を入力可能に
-5. 資材発注時に資材名を自動記録
-
----
-
-#### 19. 資材発注機能の拡張（複数品目対応）
-**日付**: 2024年  
-**目的**: 資材発注を1品目から最大10品目まで一度に発注できるようにする  
-**追加内容**:
-- `Dialog.html`: 資材発注フォームを複数品目対応に変更
-  - 資材選択と数量入力のフィールドを動的に追加可能（最大10品目）
-  - 各品目に削除ボタンを追加
-  - 「資材を追加 (+)」ボタンで品目を追加
-  - `addMaterialOrderField()`関数を追加
-  - `updateMaterialOrderFieldNumbers()`関数を追加
-  - `updateMaterialOrderAddButton()`関数を追加
-- `Code.gs`: `processForm`関数で複数の資材発注データを受け取る処理に変更
-  - 各資材ごとに個別の発注IDを生成
-  - 各資材をMaterial_Ordersシートに記録
-  - 発注完了メッセージに発注件数と発注IDを表示
-- 数量チェックの処理順序を修正（資材発注モードでは`form.materialOrders`配列を使用）
-
-**機能詳細**:
-- 1回の操作で最大10品目の資材を発注可能
-- 各資材ごとに個別の発注IDが生成される
-- 受領予定日は全品目で共通
-- BOM登録フォームと同様のUIデザイン
-
-**影響範囲**: 
-- `Code.gs` - `processForm`関数
-- `Dialog.html` - 資材発注フォーム、JavaScript関数追加
-
----
-
-#### 20. 資材発注機能のバグ修正
-**日付**: 2024年  
-**問題**: 
-- 資材発注時に「数量が指定されていません」というエラーが発生
-- 商品受注モードで`qty`変数が重複宣言される構文エラーが発生
-
-**原因**: 
-- 資材発注モードでも全モード共通の数量チェックが実行されていた
-- 商品受注モードの処理で`qty`変数が2回宣言されていた
-
-**修正内容**:
-- `Code.gs`: 資材発注モードの処理を数量チェックの前に移動
-- `Code.gs`: 商品受注モードの重複した数量チェックを削除
-- 数量チェックは商品受注モードでのみ実行するように変更
-
-**影響範囲**: 
-- `Code.gs` - `processForm`関数
+- 最終更新日: 2024年12月
+- 主要機能: 資材管理、商品管理、BOM管理、売上管理、製造業者管理、納期回答書作成、不足資材ログ管理
