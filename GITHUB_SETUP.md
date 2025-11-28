@@ -101,4 +101,3 @@ git push -u origin main
 - 他の開発者と共有
 - IssuesやPull Requestsを使用した開発管理
 - GitHub Actionsでの自動化（将来の拡張）
-

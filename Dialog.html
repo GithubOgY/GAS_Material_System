@@ -76,7 +76,8 @@
                 <div id="materialOrderList">
                     <!-- 資材フィールドが動的に追加される -->
                 </div>
-                <button type="button" id="addMaterialOrderBtn" class="hidden" style="background-color: #2196F3; margin-top: 10px; width: auto; padding: 5px 15px;">
+                <button type="button" id="addMaterialOrderBtn" class="hidden"
+                    style="background-color: #2196F3; margin-top: 10px; width: auto; padding: 5px 15px;">
                     資材を追加 (+)
                 </button>
                 <div id="maxMaterialOrdersMsg" class="hidden" style="color: #666; font-size: 12px; margin-top: 5px;">
@@ -98,7 +99,8 @@
                 <div id="bomMaterialsList">
                     <!-- 資材フィールドが動的に追加される -->
                 </div>
-                <button type="button" id="addMaterialBtn" class="hidden" style="background-color: #2196F3; margin-top: 10px; width: auto; padding: 5px 15px;">
+                <button type="button" id="addMaterialBtn" class="hidden"
+                    style="background-color: #2196F3; margin-top: 10px; width: auto; padding: 5px 15px;">
                     資材を追加 (+)
                 </button>
                 <div id="maxMaterialsMsg" class="hidden" style="color: #666; font-size: 12px; margin-top: 5px;">
@@ -109,24 +111,27 @@
             <!-- Product Order Fields (商品受注専用) -->
             <div class="form-group hidden" id="productOrderFields">
                 <label for="clientOrderNumber">相手先の発注番号 (7桁の数字):</label>
-                <input type="text" id="clientOrderNumber" name="clientOrderNumber" pattern="[0-9]{7}" maxlength="7" placeholder="例: 1234567">
-                
+                <input type="text" id="clientOrderNumber" name="clientOrderNumber" pattern="[0-9]{7}" maxlength="7"
+                    placeholder="例: 1234567">
+
                 <label for="productNameSelect" style="margin-top: 15px;">商品名を選択:</label>
                 <select id="productNameSelect" name="productNameSelect" onchange="onProductNameSelected(this)">
                     <option value="" disabled selected>商品名を選択してください</option>
                     <!-- Options will be populated by GAS -->
                 </select>
-                
-                <div style="margin-top: 10px; padding: 10px; background-color: #f5f5f5; border-radius: 4px; font-size: 12px; color: #666;">
+
+                <div
+                    style="margin-top: 10px; padding: 10px; background-color: #f5f5f5; border-radius: 4px; font-size: 12px; color: #666;">
                     <strong>または</strong> 商品番号を直接入力することもできます
                 </div>
-                
+
                 <label for="productNumber" style="margin-top: 15px;">商品番号 (6桁の数字):</label>
-                <input type="text" id="productNumber" name="productNumber" pattern="[0-9]{6}" maxlength="6" placeholder="例: 012345" onblur="onProductNumberInput(this)">
-                
+                <input type="text" id="productNumber" name="productNumber" pattern="[0-9]{6}" maxlength="6"
+                    placeholder="例: 012345" onblur="onProductNumberInput(this)">
+
                 <label for="productName" style="margin-top: 15px;">商品名:</label>
                 <input type="text" id="productName" name="productName" placeholder="商品名（自動入力または手入力）">
-                
+
                 <label for="deliveryDate" style="margin-top: 15px;">納期:</label>
                 <input type="date" id="deliveryDate" name="deliveryDate">
             </div>
@@ -191,7 +196,7 @@
             document.getElementById('quantityGroup').style.display = 'block';
             document.getElementById('customQtyGroup').classList.add('hidden');
             document.getElementById('expectedReceiptDateGroup').classList.add('hidden');
-            
+
             // BOM資材リストをクリア
             document.getElementById('bomMaterialsList').innerHTML = '';
             // 資材発注リストをクリア
@@ -213,7 +218,7 @@
                 // 数量選択を非表示（資材発注では各資材ごとに数量を入力）
                 document.getElementById('quantityGroup').style.display = 'none';
                 document.getElementById('customQtyGroup').style.display = 'none';
-                
+
                 // 資材リストをグローバル変数に保存
                 if (dataList && dataList.length > 0) {
                     window.materialOrderList = dataList;
@@ -221,19 +226,37 @@
                     console.error('資材発注: 資材リストの設定に失敗');
                     window.materialOrderList = [];
                 }
-                
+
                 // 資材発注フィールドカウントをリセット
                 materialOrderFieldCount = 0;
+
+                // Datalistの作成
+                let dataListElem = document.getElementById('materialDataList');
+                if (!dataListElem) {
+                    dataListElem = document.createElement('datalist');
+                    dataListElem.id = 'materialDataList';
+                    document.body.appendChild(dataListElem);
+                }
+                dataListElem.innerHTML = '';
+                if (dataList && dataList.length > 0) {
+                    dataList.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.id;
+                        option.label = item.name;
+                        dataListElem.appendChild(option);
+                    });
+                }
+
                 // 最初の資材フィールドを追加
                 addMaterialOrderField(dataList);
-                
+
                 // 資材追加ボタンのイベントリスナーを設定
                 const addBtn = document.getElementById('addMaterialOrderBtn');
                 if (addBtn) {
                     // 既存のイベントリスナーを削除してから追加
                     const newBtn = addBtn.cloneNode(true);
                     addBtn.parentNode.replaceChild(newBtn, addBtn);
-                    newBtn.addEventListener('click', function() {
+                    newBtn.addEventListener('click', function () {
                         addMaterialOrderField();
                     });
                 }
@@ -245,13 +268,13 @@
                 document.getElementById('productOrderFields').classList.remove('hidden');
                 // 数量選択を表示
                 document.getElementById('quantityGroup').style.display = 'block';
-                
+
                 // 商品名リストボックスを設定
                 const productNameSelect = document.getElementById('productNameSelect');
                 if (productNameSelect && dataList && dataList.length > 0) {
                     // 商品リストをグローバル変数に保存（商品番号入力時の検索用）
                     window.productList = dataList;
-                    
+
                     dataList.forEach(item => {
                         if (item && item.productName && item.productNumber) {
                             const option = document.createElement('option');
@@ -295,7 +318,7 @@
                 document.getElementById('bomMaterialsGroup').classList.remove('hidden');
                 document.getElementById('addMaterialBtn').classList.remove('hidden');
                 document.getElementById('maxMaterialsMsg').classList.remove('hidden');
-                
+
                 // 商品リストを設定（DOMは既に表示されているため即座に設定可能）
                 const productSelectAfter = document.getElementById('productId');
                 if (productSelectAfter) {
@@ -303,7 +326,7 @@
                     while (productSelectAfter.options.length > 1) {
                         productSelectAfter.remove(1);
                     }
-                    
+
                     // 商品リストを設定
                     if (dataList && dataList.length > 0) {
                         dataList.forEach(item => {
@@ -323,19 +346,19 @@
                         productSelectAfter.appendChild(errorOption);
                     }
                 }
-                
+
                 // 資材フィールドカウントをリセット
                 materialFieldCount = 0;
                 // 最初の資材フィールドを追加
                 addBomMaterialField(dataList2);
-                
+
                 // 資材追加ボタンのイベントリスナーを設定
                 const addBtn = document.getElementById('addMaterialBtn');
                 if (addBtn) {
                     // 既存のイベントリスナーを削除してから追加
                     const newBtn = addBtn.cloneNode(true);
                     addBtn.parentNode.replaceChild(newBtn, addBtn);
-                    newBtn.addEventListener('click', function() {
+                    newBtn.addEventListener('click', function () {
                         addBomMaterialField();
                     });
                 }
@@ -348,7 +371,7 @@
                 document.getElementById('customQtyGroup').style.display = 'none';
                 // 納期回答書作成専用フィールドを表示
                 document.getElementById('deliveryResponseFields').classList.remove('hidden');
-                
+
                 // 受注日リストボックスを設定
                 const orderDateSelect = document.getElementById('orderDateSelect');
                 if (orderDateSelect && dataList && dataList.length > 0) {
@@ -369,7 +392,8 @@
             }
 
             // リストボックスの設定確認（開発時のみ）
-            if (mode !== 'REGISTER_BOM' && mode !== 'CREATE_DELIVERY_RESPONSE' && select && select.options.length <= 1) {
+            // ORDER_MATERIALは動的に追加するためここではチェックしない
+            if (mode !== 'REGISTER_BOM' && mode !== 'CREATE_DELIVERY_RESPONSE' && mode !== 'ORDER_MATERIAL' && select && select.options.length <= 1) {
                 console.warn(`${mode}モード: リストボックスにオプションが設定されていません`);
             }
         }
@@ -413,14 +437,20 @@
             materialField.id = `materialOrderField_${fieldIndex}`;
 
             materialField.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="flex: 3;">
-                        <label style="font-size: 12px; color: #666;">資材 ${fieldIndex + 1}:</label>
-                        <select class="material-order-select" data-index="${fieldIndex}" style="width: 100%;" required>
+                <div style="display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 120px;">
+                        <label style="font-size: 12px; color: #666;">資材ID:</label>
+                        <input type="text" class="material-id-input" data-index="${fieldIndex}" 
+                               placeholder="例: B19, 166683" maxlength="20"
+                               style="width: 100%;" oninput="onMaterialIdInput(this)">
+                    </div>
+                    <div style="flex: 2; min-width: 150px;">
+                        <label style="font-size: 12px; color: #666;">資材名:</label>
+                        <select class="material-name-select" data-index="${fieldIndex}" style="width: 100%;" onchange="onMaterialNameChange(this)">
                             <option value="" disabled selected>選択してください</option>
                         </select>
                     </div>
-                    <div style="flex: 1;">
+                    <div style="flex: 1; min-width: 80px;">
                         <label style="font-size: 12px; color: #666;">数量:</label>
                         <input type="number" class="material-order-quantity-input" data-index="${fieldIndex}" min="1" step="1" style="width: 100%;" required>
                     </div>
@@ -430,22 +460,22 @@
 
             materialOrderList.appendChild(materialField);
 
-            // 資材リストを設定
-            const select = materialField.querySelector('.material-order-select');
+            // 資材プルダウンを設定
+            const select = materialField.querySelector('.material-name-select');
+
             if (select && materialOrderOptions && materialOrderOptions.length > 0) {
                 materialOrderOptions.forEach(item => {
                     const option = document.createElement('option');
                     option.value = item.id;
-                    option.textContent = item.name + ' (' + item.id + ')';
+                    option.textContent = item.name;
+                    option.setAttribute('data-id', item.id); // IDを属性として保持
                     select.appendChild(option);
                 });
-            } else if (materialOrderOptions.length === 0) {
-                console.error('資材リストが設定されていません');
             }
 
             // 削除ボタンのイベント
             const removeBtn = materialField.querySelector('.remove-material-order-btn');
-            removeBtn.addEventListener('click', function() {
+            removeBtn.addEventListener('click', function () {
                 materialField.remove();
                 materialOrderFieldCount--;
                 updateMaterialOrderFieldNumbers();
@@ -457,18 +487,20 @@
         }
 
         function updateMaterialOrderFieldNumbers() {
-            const fields = document.querySelectorAll('.material-order-select');
-            fields.forEach((field, index) => {
-                const fieldDiv = field.closest('.form-group');
-                const label = fieldDiv.querySelector('label');
-                if (label) {
-                    label.textContent = `資材 ${index + 1}:`;
-                }
-                field.setAttribute('data-index', index);
+            const idInputs = document.querySelectorAll('.material-id-input');
+            idInputs.forEach((input, index) => {
+                const fieldDiv = input.closest('.form-group');
+                input.setAttribute('data-index', index);
+
+                const select = fieldDiv.querySelector('.material-name-select');
+                if (select) select.setAttribute('data-index', index);
+
                 const qtyInput = fieldDiv.querySelector('.material-order-quantity-input');
-                const removeBtn = fieldDiv.querySelector('.remove-material-order-btn');
                 if (qtyInput) qtyInput.setAttribute('data-index', index);
+
+                const removeBtn = fieldDiv.querySelector('.remove-material-order-btn');
                 if (removeBtn) removeBtn.setAttribute('data-index', index);
+
                 fieldDiv.id = `materialOrderField_${index}`;
             });
         }
@@ -530,7 +562,7 @@
                     </div>
                     <button type="button" class="remove-material-btn" data-index="${fieldIndex}" style="background-color: #f44336; color: white; padding: 6px 10px; margin-top: 20px; font-size: 12px; border: none; border-radius: 4px; cursor: pointer; flex-shrink: 0; width: 60px;">削除</button>
                 </div>
-            `;
+                `;
 
             materialsList.appendChild(materialField);
 
@@ -549,7 +581,7 @@
 
             // 削除ボタンのイベント
             const removeBtn = materialField.querySelector('.remove-material-btn');
-            removeBtn.addEventListener('click', function() {
+            removeBtn.addEventListener('click', function () {
                 materialField.remove();
                 materialFieldCount--;
                 updateMaterialFieldNumbers();
@@ -566,14 +598,14 @@
                 const fieldDiv = field.closest('.form-group');
                 const label = fieldDiv.querySelector('label');
                 if (label) {
-                    label.textContent = `資材 ${index + 1}:`;
+                    label.textContent = `資材 ${index + 1}: `;
                 }
                 field.setAttribute('data-index', index);
                 const qtyInput = fieldDiv.querySelector('.bom-quantity-input');
                 const removeBtn = fieldDiv.querySelector('.remove-material-btn');
                 if (qtyInput) qtyInput.setAttribute('data-index', index);
                 if (removeBtn) removeBtn.setAttribute('data-index', index);
-                fieldDiv.id = `materialField_${index}`;
+                fieldDiv.id = `materialField_${index} `;
             });
         }
 
@@ -611,15 +643,15 @@
             if (!select || !select.value) {
                 return;
             }
-            
+
             const selectedOption = select.options[select.selectedIndex];
             const productNumber = select.value;
             const productName = selectedOption.getAttribute('data-product-name') || selectedOption.textContent.split(' (')[0];
-            
+
             // 商品番号と商品名を自動入力
             const productNumberInput = document.getElementById('productNumber');
             const productNameInput = document.getElementById('productName');
-            
+
             if (productNumberInput) {
                 productNumberInput.value = productNumber;
             }
@@ -633,7 +665,7 @@
             if (!input || !input.value) {
                 return;
             }
-            
+
             // 商品番号を6桁にパディング（先頭0を保持）
             let productNumber = input.value.trim();
             // 数字のみを抽出
@@ -646,24 +678,24 @@
             if (productNumber.length > 6) {
                 productNumber = productNumber.substring(0, 6);
             }
-            
+
             // 入力フィールドに正規化した値を設定
             if (input.value.trim() !== productNumber) {
                 input.value = productNumber;
             }
-            
+
             // 6桁未満の場合は商品名を設定しない（入力途中の可能性があるため）
             if (productNumber.length < 6) {
                 return;
             }
-            
+
             const productList = window.productList || [];
-            
+
             if (productList.length === 0) {
                 console.warn('商品リストが読み込まれていません');
                 return;
             }
-            
+
             // 商品番号で検索（正規化して比較）
             const normalizedSearchNumber = productNumber.padStart(6, '0');
             const product = productList.find(item => {
@@ -674,7 +706,7 @@
                 const itemNumber = String(item.productNumber).trim().padStart(6, '0');
                 return itemNumber === normalizedSearchNumber;
             });
-            
+
             if (product && product.productName) {
                 // 商品名を自動入力
                 const productNameInput = document.getElementById('productName');
@@ -683,7 +715,7 @@
                     // 入力イベントを発火して、値が設定されたことを確認
                     productNameInput.dispatchEvent(new Event('input', { bubbles: true }));
                 }
-                
+
                 // 商品名リストボックスも更新（商品番号を正規化して検索）
                 const productNameSelect = document.getElementById('productNameSelect');
                 if (productNameSelect) {
@@ -708,6 +740,69 @@
             }
         }
 
+        // 資材ID入力時の処理（リアルタイム検索）
+        function onMaterialIdInput(input) {
+            const val = input.value.trim().toUpperCase(); // 大文字に統一
+
+            // 対応するプルダウンを検索して選択
+            const fieldDiv = input.closest('.form-group');
+            const select = fieldDiv.querySelector('.material-name-select');
+
+            if (select && val) {
+                // IDが一致するオプションを探す
+                let found = false;
+
+                // 入力値が数字のみかチェック
+                const inputIsNumeric = /^[0-9]+$/.test(val);
+                const inputAsNumber = inputIsNumeric ? parseInt(val, 10) : null;
+
+                for (let i = 0; i < select.options.length; i++) {
+                    const option = select.options[i];
+                    const optId = option.getAttribute('data-id') || option.value;
+                    const normalizedOptId = String(optId).trim().toUpperCase();
+
+                    // 1. 完全一致で比較
+                    if (normalizedOptId === val) {
+                        select.selectedIndex = i;
+                        found = true;
+                        break;
+                    }
+
+                    // 2. 入力値が数字のみの場合、数値として比較（先頭ゼロ対応）
+                    if (inputIsNumeric && /^[0-9]+$/.test(normalizedOptId)) {
+                        const optAsNumber = parseInt(normalizedOptId, 10);
+                        if (inputAsNumber === optAsNumber) {
+                            select.selectedIndex = i;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!found) {
+                    // 見つからない場合は選択を解除
+                    select.value = "";
+                }
+            } else if (select && !val) {
+                // 入力が空の場合も選択を解除
+                select.value = "";
+            }
+        }
+
+        // 資材名変更時の処理
+        function onMaterialNameChange(select) {
+            const val = select.value;
+            if (!val) return;
+
+            const fieldDiv = select.closest('.form-group');
+            const input = fieldDiv.querySelector('.material-id-input');
+
+            if (input) {
+                // 選択された資材のIDをそのまま入力欄にセット
+                input.value = val;
+            }
+        }
+
         // Handle form submission
         function handleSubmit(e) {
             e.preventDefault();
@@ -716,7 +811,7 @@
             const formData = {
                 mode: mode
             };
-            
+
             // バリデーション
             if (mode === 'REGISTER_BOM') {
                 // BOM登録モード
@@ -725,12 +820,12 @@
                     alert('商品を選択してください。');
                     return;
                 }
-                
+
                 formData.productId = productId;
                 const materials = [];
                 const materialSelects = document.querySelectorAll('.bom-material-select');
                 const quantityInputs = document.querySelectorAll('.bom-quantity-input');
-                
+
                 materialSelects.forEach((select, index) => {
                     const materialId = select.value;
                     const quantity = quantityInputs[index] ? parseFloat(quantityInputs[index].value) : 0;
@@ -741,12 +836,12 @@
                         });
                     }
                 });
-                
+
                 if (materials.length === 0) {
                     alert('少なくとも1つの資材を登録してください。');
                     return;
                 }
-                
+
                 formData.materials = materials;
             } else if (mode === 'MANUFACTURE_PRODUCT') {
                 // 製造業者選択モード
@@ -762,7 +857,7 @@
                 let productNumber = form.productNumber.value.trim();
                 let productName = form.productName.value.trim();
                 const deliveryDate = form.deliveryDate.value;
-                
+
                 // バリデーション
                 if (!clientOrderNumber) {
                     alert('相手先の発注番号を入力してください。');
@@ -772,12 +867,12 @@
                     alert('相手先の発注番号は7桁の数字で入力してください。');
                     return;
                 }
-                
+
                 if (!productNumber) {
                     alert('商品番号を入力してください。');
                     return;
                 }
-                
+
                 // 商品番号を6桁に正規化
                 productNumber = productNumber.replace(/[^0-9]/g, '');
                 if (productNumber.length < 6) {
@@ -786,12 +881,12 @@
                 if (productNumber.length > 6) {
                     productNumber = productNumber.substring(0, 6);
                 }
-                
+
                 if (!/^[0-9]{6}$/.test(productNumber)) {
                     alert('商品番号は6桁の数字で入力してください。');
                     return;
                 }
-                
+
                 // 商品名が空の場合、商品番号から商品名を取得
                 if (!productName) {
                     const productList = window.productList || [];
@@ -802,7 +897,7 @@
                         const itemNumber = String(item.productNumber).trim().padStart(6, '0');
                         return itemNumber === productNumber;
                     });
-                    
+
                     if (product && product.productName) {
                         productName = product.productName;
                         // 商品名フィールドに設定
@@ -815,20 +910,20 @@
                         return;
                     }
                 }
-                
+
                 if (!deliveryDate) {
                     alert('納期を選択してください。');
                     return;
                 }
-                
+
                 let quantity = form.quantitySelect.value === 'custom' ? form.customQty.value : form.quantitySelect.value;
                 quantity = parseInt(quantity);
-                
+
                 if (isNaN(quantity) || quantity <= 0) {
                     alert('数量は1以上の整数を入力してください。');
                     return;
                 }
-                
+
                 formData.clientOrderNumber = clientOrderNumber;
                 formData.productNumber = productNumber;
                 formData.productName = productName;
@@ -845,11 +940,24 @@
             } else {
                 // 資材発注モード
                 const materialOrders = [];
-                const materialSelects = document.querySelectorAll('.material-order-select');
+                const materialIdInputs = document.querySelectorAll('.material-id-input');
+                const materialSelects = document.querySelectorAll('.material-name-select');
                 const quantityInputs = document.querySelectorAll('.material-order-quantity-input');
-                
-                materialSelects.forEach((select, index) => {
-                    const materialId = select.value;
+
+                materialIdInputs.forEach((input, index) => {
+                    // ID入力欄の値、またはプルダウンの値を採用
+                    // 基本的には連動しているはずだが、念のため両方チェック
+                    let materialId = input.value;
+                    const selectVal = materialSelects[index] ? materialSelects[index].value : '';
+
+                    // ID入力欄が空でプルダウンが選択されている場合はプルダウンの値を使用
+                    if (!materialId && selectVal) {
+                        materialId = selectVal;
+                    }
+
+                    // ID入力があるがプルダウンと一致しない場合（手入力）は、
+                    // マスタに存在するか確認したほうが良いが、ここではそのまま送信しGAS側で検証
+
                     const quantity = quantityInputs[index] ? parseInt(quantityInputs[index].value) : 0;
                     if (materialId && quantity > 0) {
                         materialOrders.push({
@@ -858,14 +966,14 @@
                         });
                     }
                 });
-                
+
                 if (materialOrders.length === 0) {
                     alert('少なくとも1つの資材を発注してください。');
                     return;
                 }
-                
+
                 const expectedReceiptDate = form.expectedReceiptDate ? form.expectedReceiptDate.value : '';
-                
+
                 formData.materialOrders = materialOrders;
                 formData.expectedReceiptDate = expectedReceiptDate;
             }

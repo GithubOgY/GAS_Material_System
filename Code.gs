@@ -16,7 +16,8 @@ const SHEET_NAMES = {
   MAT_ORDERS: 'Material_Orders',
   PROD_ORDERS: 'Product_Orders',
   SALES: 'Sales',
-  MANUFACTURERS: 'Manufacturers'
+  MANUFACTURERS: 'Manufacturers',
+  SHORTAGE_LOG: 'Shortage_Log'
 };
 
 // グローバル変数で一時的にモードを保存 (PropertiesServiceを使用)
@@ -37,6 +38,8 @@ function onOpen() {
     .addItem('6. BOMを登録する', 'openBOMDialog')
     .addSeparator()
     .addItem('7. 納期回答書を作成する', 'openDeliveryResponseDialog')
+    .addSeparator()
+    .addItem('8. 不足資材を確認する (選択行)', 'menuShowShortage')
     .addToUi();
 }
 
@@ -111,11 +114,13 @@ function getListFromSheet(sheetName) {
   try {
     const sheet = getSheet(sheetName);
     const values = sheet.getDataRange().getValues();
+    const displayValues = sheet.getDataRange().getDisplayValues(); // 表示値として取得（先頭ゼロ保持）
     const list = [];
     
     // 1行目はヘッダーなのでスキップ
     for (let i = 1; i < values.length; i++) {
-      const id = values[i][0];
+      // IDは表示値を使用（先頭ゼロを保持）、名前は通常の値を使用
+      const id = displayValues[i][0];
       const name = values[i][1];
       if (id && name) {
         list.push({ id: String(id).trim(), name: String(name).trim() });
@@ -318,6 +323,14 @@ function processForm(form) {
     // Product_Ordersシートの構造: OrderID, Date, ClientOrderNumber, ProductNumber, ProductName, Quantity, DeliveryDate, Status, Manufacturer
     sheet.appendRow([orderId, date, clientOrderNumber, productNumber, productName, qty, deliveryDate, status, '']);
 
+    // 不足資材がある場合は記録
+    if (isShortage && productId) {
+      const bomData = getBOM(productId);
+      if (bomData.length > 0) {
+        recordShortageMaterials(orderId, productId, productNumber, productName, qty, bomData);
+      }
+    }
+
     if (isShortage) {
       return { message: `受注しましたが、製造できません (ステータス: Shortage)${shortageMsg}` };
     } else {
@@ -409,10 +422,23 @@ function menuReceiveMaterial() {
 
   sheet.getRange(row, 6).setValue('Received'); // F列（Status）
   
+  // Shortage_Logを先入先出で更新
+  const resolvedShortageOrders = updateShortageLogFIFO(matId, qty);
+  
   // Shortage状態の受注をチェックして、在庫が十分になったらOrderedに戻す
   const resolvedOrders = checkAndResolveShortageOrders();
   
   let message = `資材を受領しました。${matId} の在庫を更新しました。`;
+  
+  // Shortage_Logから削除された受注がある場合
+  if (resolvedShortageOrders.length > 0) {
+    message += `\n\n以下の受注の不足資材がすべて解決され、Shortage_Logから削除されました:\n`;
+    resolvedShortageOrders.forEach(orderId => {
+      message += `- ${orderId}\n`;
+    });
+  }
+  
+  // ステータスがOrderedに更新された受注がある場合
   if (resolvedOrders.length > 0) {
     message += `\n\n以下の受注の在庫不足が解決され、ステータスを「Ordered」に更新しました:\n`;
     resolvedOrders.forEach(orderId => {
@@ -477,6 +503,11 @@ function checkAndResolveShortageOrders() {
         if (!isShortage) {
           prodOrdersSheet.getRange(i + 1, 8).setValue('Ordered'); // H列（Status）
           resolvedOrders.push(orderId);
+          // 不足資材ログから該当する記録を削除
+          removeShortageLog(orderId);
+        } else {
+          // 在庫がまだ不足している場合は、不足資材ログを更新
+          updateShortageLog(orderId, prodId, productNumber, data[i][4] || '', orderQty, bomData);
         }
       }
     }
@@ -574,11 +605,30 @@ function processManufacture(manufacturerId) {
   }
 
   const sheet = getSheet(SHEET_NAMES.PROD_ORDERS);
-  const prodId = sheet.getRange(row, 4).getValue();
-  const orderQty = Number(sheet.getRange(row, 5).getValue());
+  // 新しい構造: A=OrderID, B=Date, C=ClientOrderNumber, D=ProductNumber, E=ProductName, F=Quantity, G=DeliveryDate, H=Status, I=Manufacturer
+  const productNumber = sheet.getRange(row, 4).getValue(); // D列（ProductNumber）
+  const orderQty = Number(sheet.getRange(row, 6).getValue()); // F列（Quantity）
+
+  if (!productNumber) {
+    throw new Error('商品番号が取得できませんでした。');
+  }
+
+  if (isNaN(orderQty) || orderQty <= 0) {
+    throw new Error('数量が不正です。');
+  }
+
+  // 商品番号から商品IDを取得
+  const prodId = getProductIdByNumber(productNumber);
+  if (!prodId) {
+    throw new Error(`商品番号 "${productNumber}" に対応する商品IDが見つかりません。`);
+  }
 
   // 在庫を引き落とす
   const bomData = getBOM(prodId);
+  if (bomData.length === 0) {
+    throw new Error(`商品番号 "${productNumber}" のBOM(部品表)が見つかりません。`);
+  }
+
   for (const item of bomData) {
     const needed = item.qty * orderQty;
     updateStock(item.matId, -needed);
@@ -692,13 +742,22 @@ function menuDeliverProduct() {
     const clientName = clientOrderNumber || productName || '';
     salesSheet.appendRow([orderId, deliveryDate, clientName, prodId, quantity, unitPrice, totalAmount, manufacturerId]);
     
-    // ステータスを更新
-    sheet.getRange(row, 8).setValue('Delivered'); // H列（Status）
-    
     // 製造業者名を取得してメッセージに含める
     const manufacturerName = manufacturerId ? getManufacturerName(manufacturerId) : null;
     const manufacturerDisplay = manufacturerId ? (manufacturerName ? `${manufacturerName} (${manufacturerId})` : manufacturerId) : '未設定';
-    showAlert(`納品完了。売上 ${totalAmount.toLocaleString()}円 として記録されました。製造業者: ${manufacturerDisplay}`);
+    
+    // Shortage_Logからも該当する受注IDの記録を削除（納品完了のため）
+    try {
+      removeShortageLog(orderId);
+    } catch (error) {
+      Logger.log(`Shortage_Log削除エラー: ${error.message}`);
+      // エラーが発生しても処理を続行
+    }
+    
+    // Product_Ordersシートから該当行を削除
+    sheet.deleteRow(row);
+    
+    showAlert(`納品完了。売上 ${totalAmount.toLocaleString()}円 として記録されました。\nProduct_Ordersシートから削除しました。\n製造業者: ${manufacturerDisplay}`);
   } catch (error) {
     showAlert(`売上記録エラー: ${error.message}`);
   }
@@ -855,14 +914,32 @@ function getMaterialName(matId) {
   
   try {
     const sheet = getSheet(SHEET_NAMES.MATERIALS);
-    const data = sheet.getDataRange().getValues();
-    const normalizedMatId = String(matId).trim();
+    const displayValues = sheet.getDataRange().getDisplayValues();
+    const values = sheet.getDataRange().getValues();
+    const normalizedMatId = String(matId).trim().toUpperCase();
     
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][0]).trim() === normalizedMatId) {
-        return data[i][1] ? String(data[i][1]).trim() : null;
+    // 入力IDが数値のみかチェック
+    const inputIsNumeric = /^[0-9]+$/.test(normalizedMatId);
+    const inputAsNumber = inputIsNumeric ? parseInt(normalizedMatId, 10) : null;
+    
+    for (let i = 1; i < displayValues.length; i++) {
+      const cellId = String(displayValues[i][0]).trim().toUpperCase();
+      
+      // 1. 完全一致で比較
+      if (cellId === normalizedMatId) {
+        return values[i][1] ? String(values[i][1]).trim() : null;
+      }
+      
+      // 2. 両方が数値の場合、数値として比較（先頭ゼロ対応）
+      if (inputIsNumeric && /^[0-9]+$/.test(cellId)) {
+        const cellAsNumber = parseInt(cellId, 10);
+        if (inputAsNumber === cellAsNumber) {
+          return values[i][1] ? String(values[i][1]).trim() : null;
+        }
       }
     }
+    
+    Logger.log(`資材ID \"${matId}\" に対応する資材名が見つかりませんでした`);
     return null;
   } catch (error) {
     Logger.log(`getMaterialName エラー: ${error.message}`);
@@ -1094,77 +1171,401 @@ function registerBOM(productId, materials) {
 }
 
 /**
- * 受注日のリストを取得する（納期回答書作成用）
- * @return {Array<Object>} 受注日のリスト（id, nameを含む）
+ * 不足資材を記録する
+ * @param {string} orderId - 受注ID
+ * @param {string} productId - 商品ID
+ * @param {string} productNumber - 商品番号
+ * @param {string} productName - 商品名
+ * @param {number} orderQty - 受注数量
+ * @param {Array<Object>} bomData - BOMデータの配列
  */
-function getOrderDatesList() {
+function recordShortageMaterials(orderId, productId, productNumber, productName, orderQty, bomData) {
   try {
-    const sheet = getSheet(SHEET_NAMES.PROD_ORDERS);
-    const data = sheet.getDataRange().getValues();
-    const dates = new Set();
-    
-    // 2行目以降をチェック（1行目はヘッダー）
-    for (let i = 1; i < data.length; i++) {
-      const date = data[i][1]; // B列（Date）
-      if (date) {
-        // 日付をYYYY-MM-DD形式に変換
-        const dateObj = new Date(date);
-        if (!isNaN(dateObj.getTime())) {
-          const dateStr = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-          dates.add(dateStr);
+    // Shortage_Logシートを取得または作成
+    let shortageSheet;
+    try {
+      shortageSheet = getSheet(SHEET_NAMES.SHORTAGE_LOG);
+      // 既存のシートがある場合、ヘッダーが英語の場合は日本語に更新
+      const headerRow = shortageSheet.getRange(1, 1, 1, 11).getValues()[0];
+      const englishHeaders = ['OrderID', 'ProductID', 'ProductNumber', 'ProductName', 'OrderQuantity', 'MaterialID', 'MaterialName', 'RequiredQty', 'CurrentStock', 'ShortageQty', 'Date'];
+      const japaneseHeaders = ['受注ID', '商品ID', '商品番号', '商品名', '受注数量', '資材ID', '資材名', '必要数量', '現在庫', '不足数量', '記録日'];
+      
+      // ヘッダーが英語の場合は日本語に更新
+      if (headerRow[0] === englishHeaders[0]) {
+        for (let i = 0; i < japaneseHeaders.length; i++) {
+          shortageSheet.getRange(1, i + 1).setValue(japaneseHeaders[i]);
         }
+        // ヘッダー行のスタイル設定
+        const headerRange = shortageSheet.getRange(1, 1, 1, 11);
+        headerRange.setFontWeight('bold');
+        headerRange.setBackground('#e0e0e0');
+      }
+    } catch (error) {
+      // シートが存在しない場合は作成
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      shortageSheet = ss.insertSheet(SHEET_NAMES.SHORTAGE_LOG);
+      // ヘッダー行を設定
+      shortageSheet.appendRow([
+        '受注ID',
+        '商品ID',
+        '商品番号',
+        '商品名',
+        '受注数量',
+        '資材ID',
+        '資材名',
+        '必要数量',
+        '現在庫',
+        '不足数量',
+        '記録日'
+      ]);
+      // ヘッダー行のスタイル設定
+      const headerRange = shortageSheet.getRange(1, 1, 1, 11);
+      headerRange.setFontWeight('bold');
+      headerRange.setBackground('#e0e0e0');
+    }
+
+    const date = new Date();
+    
+    // 既存の記録を削除（同じ受注IDの古い記録を削除）
+    const data = shortageSheet.getDataRange().getValues();
+    const rowsToDelete = [];
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (data[i][0] === orderId) {
+        rowsToDelete.push(i + 1);
       }
     }
-    
-    // 日付を降順でソート
-    const sortedDates = Array.from(dates).sort().reverse();
-    
-    return sortedDates.map(date => ({
-      id: date,
-      name: date
-    }));
+    // 下から上に削除（行番号がずれないように）
+    rowsToDelete.forEach(row => {
+      shortageSheet.deleteRow(row);
+    });
+
+    // 不足している資材を記録
+    for (const item of bomData) {
+      const needed = item.qty * orderQty;
+      const currentStock = getStock(item.matId);
+      
+      if (currentStock < needed) {
+        const shortageQty = needed - currentStock;
+        const materialName = getMaterialName(item.matId) || '';
+        
+        shortageSheet.appendRow([
+          orderId,
+          productId,
+          productNumber,
+          productName,
+          orderQty,
+          item.matId,
+          materialName,
+          needed,
+          currentStock,
+          shortageQty,
+          date
+        ]);
+      }
+    }
   } catch (error) {
-    Logger.log(`getOrderDatesList エラー: ${error.message}`);
-    return [];
+    Logger.log(`recordShortageMaterials エラー: ${error.message}`);
+    // エラーが発生しても処理を続行
   }
 }
 
 /**
- * 指定した受注日の受注データを取得する（納期回答書作成用）
- * @param {string} orderDate - 受注日（YYYY-MM-DD形式）
- * @return {Array<Object>} 受注データの配列
+ * 不足資材ログから指定した受注IDの記録を削除する
+ * @param {string} orderId - 受注ID
  */
-function getOrdersByDate(orderDate) {
+function removeShortageLog(orderId) {
   try {
-    const sheet = getSheet(SHEET_NAMES.PROD_ORDERS);
-    const data = sheet.getDataRange().getValues();
-    const orders = [];
+    const shortageSheet = getSheet(SHEET_NAMES.SHORTAGE_LOG);
+    const data = shortageSheet.getDataRange().getValues();
+    const rowsToDelete = [];
     
-    // 2行目以降をチェック（1行目はヘッダー）
-    // 新しい構造: A=OrderID, B=Date, C=ClientOrderNumber, D=ProductNumber, E=ProductName, F=Quantity, G=DeliveryDate, H=Status, I=Manufacturer
+    // 下から上に削除（行番号がずれないように）
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (data[i][0] === orderId) {
+        rowsToDelete.push(i + 1);
+      }
+    }
+    
+    rowsToDelete.forEach(row => {
+      shortageSheet.deleteRow(row);
+    });
+  } catch (error) {
+    // シートが存在しない場合はエラーを無視
+    Logger.log(`removeShortageLog エラー: ${error.message}`);
+  }
+}
+
+/**
+ * 資材受領時にShortage_Logを先入先出で更新する
+ * @param {string} matId - 受領した資材ID
+ * @param {number} receivedQty - 受領数量
+ * @return {Array<string>} 不足が解決された受注IDのリスト
+ */
+function updateShortageLogFIFO(matId, receivedQty) {
+  const resolvedOrderIds = [];
+  
+  try {
+    const shortageSheet = getSheet(SHEET_NAMES.SHORTAGE_LOG);
+    const dataRange = shortageSheet.getDataRange();
+    const data = dataRange.getValues();
+    
+    // ヘッダー行をスキップして、該当する資材IDの記録を取得
+    const shortageRecords = [];
+    const normalizedMatId = String(matId).trim().toUpperCase();
+    
     for (let i = 1; i < data.length; i++) {
-      const date = data[i][1]; // B列（Date）
-      if (date) {
-        const dateObj = new Date(date);
-        if (!isNaN(dateObj.getTime())) {
-          const dateStr = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-          if (dateStr === orderDate) {
-            orders.push({
-              orderId: data[i][0] || '',
-              clientOrderNumber: data[i][2] || '',
-              productNumber: data[i][3] || '',
-              productName: data[i][4] || '',
-              quantity: Number(data[i][5]) || 0,
-              deliveryDate: data[i][6] || ''
-            });
+      // 資材ID列（F列、0ベースで5）を取得
+      const recordMatId = data[i][5] ? String(data[i][5]).trim().toUpperCase() : '';
+      
+      // 資材IDが一致するか確認（数値の場合は数値として比較）
+      let isMatch = false;
+      if (recordMatId === normalizedMatId) {
+        isMatch = true;
+      } else if (/^[0-9]+$/.test(normalizedMatId) && /^[0-9]+$/.test(recordMatId)) {
+        // 両方が数値の場合は数値として比較
+        if (parseInt(normalizedMatId, 10) === parseInt(recordMatId, 10)) {
+          isMatch = true;
+        }
+      }
+      
+      if (isMatch) {
+        shortageRecords.push({
+          rowIndex: i + 1, // シートの行番号（1ベース）
+          orderId: data[i][0] || '', // 受注ID
+          productId: data[i][1] || '', // 商品ID
+          productNumber: data[i][2] || '', // 商品番号
+          productName: data[i][3] || '', // 商品名
+          orderQty: Number(data[i][4]) || 0, // 受注数量
+          materialId: data[i][5] || '', // 資材ID
+          materialName: data[i][6] || '', // 資材名
+          requiredQty: Number(data[i][7]) || 0, // 必要数量
+          currentStock: Number(data[i][8]) || 0, // 現在庫
+          shortageQty: Number(data[i][9]) || 0, // 不足数量
+          date: data[i][10] || new Date() // 記録日
+        });
+      }
+    }
+    
+    if (shortageRecords.length === 0) {
+      return resolvedOrderIds;
+    }
+    
+    // 日付順（古い順）でソート
+    shortageRecords.sort((a, b) => {
+      const dateA = a.date instanceof Date ? a.date : new Date(a.date);
+      const dateB = b.date instanceof Date ? b.date : new Date(b.date);
+      return dateA.getTime() - dateB.getTime();
+    });
+    
+    // 受領数量を古い受注から順に割り当て
+    let remainingQty = receivedQty;
+    
+    for (const record of shortageRecords) {
+      if (remainingQty <= 0) {
+        break;
+      }
+      
+      // 不足数量を減らす
+      const newShortageQty = Math.max(0, record.shortageQty - remainingQty);
+      const usedQty = record.shortageQty - newShortageQty;
+      remainingQty -= usedQty;
+      
+      // 実際の現在庫を取得（updateStockで既に更新済み）
+      const actualCurrentStock = getStock(record.materialId);
+      
+      // 必要数量に対する不足数量を再計算
+      const recalculatedShortageQty = Math.max(0, record.requiredQty - actualCurrentStock);
+      
+      // 現在庫と不足数量を更新（他の列の値は保持される）
+      // 列インデックス: A=1(受注ID), B=2(商品ID), C=3(商品番号), D=4(商品名), E=5(受注数量),
+      // F=6(資材ID), G=7(資材名), H=8(必要数量), I=9(現在庫), J=10(不足数量), K=11(記録日)
+      const currentStockCell = shortageSheet.getRange(record.rowIndex, 9); // I列（現在庫）
+      const shortageQtyCell = shortageSheet.getRange(record.rowIndex, 10); // J列（不足数量）
+      
+      // 現在の値を確認（デバッグ用）
+      const currentRowData = shortageSheet.getRange(record.rowIndex, 1, 1, 11).getValues()[0];
+      
+      // 値が空でないことを確認してから更新
+      if (currentRowData[0] || currentRowData[1] || currentRowData[2]) {
+        // 他の列に値がある場合は更新を実行
+        currentStockCell.setValue(actualCurrentStock);
+        shortageQtyCell.setValue(recalculatedShortageQty);
+      } else {
+        // 他の列が空の場合は、データを再設定
+        Logger.log(`警告: 行${record.rowIndex}のデータが不完全です。データを再設定します。`);
+        shortageSheet.getRange(record.rowIndex, 1, 1, 11).setValues([[
+          record.orderId,
+          record.productId,
+          record.productNumber,
+          record.productName,
+          record.orderQty,
+          record.materialId,
+          record.materialName,
+          record.requiredQty,
+          actualCurrentStock,
+          recalculatedShortageQty,
+          record.date
+        ]]);
+      }
+      
+      // 不足数量が0になった場合、その受注の他の不足資材も確認
+      if (recalculatedShortageQty === 0) {
+        // その受注の他の不足資材がすべて解決されたか確認
+        const orderId = record.orderId;
+        
+        // 更新後のデータを再取得
+        const updatedData = shortageSheet.getDataRange().getValues();
+        const orderShortageRecords = [];
+        
+        // 同じ受注IDの他の不足資材を取得（更新後のデータから）
+        for (let i = 1; i < updatedData.length; i++) {
+          if (updatedData[i][0] === orderId) {
+            const otherShortageQty = Number(updatedData[i][9]) || 0;
+            if (otherShortageQty > 0) {
+              orderShortageRecords.push({
+                materialId: updatedData[i][5],
+                shortageQty: otherShortageQty
+              });
+            }
           }
+        }
+        
+        // その受注の不足資材がすべて解決された場合、ログから削除
+        if (orderShortageRecords.length === 0) {
+          removeShortageLog(orderId);
+          resolvedOrderIds.push(orderId);
         }
       }
     }
     
-    return orders;
   } catch (error) {
-    Logger.log(`getOrdersByDate エラー: ${error.message}`);
-    return [];
+    // シートが存在しない場合はエラーを無視
+    Logger.log(`updateShortageLogFIFO エラー: ${error.message}`);
+  }
+  
+  return resolvedOrderIds;
+}
+
+/**
+ * 不足資材ログを更新する（在庫状況が変わった場合）
+ * @param {string} orderId - 受注ID
+ * @param {string} productId - 商品ID
+ * @param {string} productNumber - 商品番号
+ * @param {string} productName - 商品名
+ * @param {number} orderQty - 受注数量
+ * @param {Array<Object>} bomData - BOMデータの配列
+ */
+function updateShortageLog(orderId, productId, productNumber, productName, orderQty, bomData) {
+  try {
+    // 既存の記録を削除してから再記録
+    removeShortageLog(orderId);
+    // 不足している資材のみ記録
+    recordShortageMaterials(orderId, productId, productNumber, productName, orderQty, bomData);
+  } catch (error) {
+    Logger.log(`updateShortageLog エラー: ${error.message}`);
+  }
+}
+
+/**
+ * 選択した受注の不足資材を表示する
+ */
+function menuShowShortage() {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  if (sheet.getName() !== SHEET_NAMES.PROD_ORDERS) {
+    showAlert(SHEET_NAMES.PROD_ORDERS + ' シートの行を選択してください。');
+    return;
+  }
+
+  const activeRange = sheet.getActiveRange();
+  if (!activeRange) {
+    showAlert('行を選択してください。');
+    return;
+  }
+
+  const row = activeRange.getRow();
+  if (row < 2) {
+    showAlert('データ行を選択してください。');
+    return;
+  }
+
+  // Product_Ordersシートの構造: A=OrderID, B=Date, C=ClientOrderNumber, D=ProductNumber, E=ProductName, F=Quantity, G=DeliveryDate, H=Status, I=Manufacturer
+  const orderId = sheet.getRange(row, 1).getValue();
+  const status = sheet.getRange(row, 8).getValue(); // H列（Status）
+
+  if (!orderId) {
+    showAlert('受注IDが取得できませんでした。');
+    return;
+  }
+
+  // Shortage_Logシートから不足資材を取得
+  try {
+    const shortageSheet = getSheet(SHEET_NAMES.SHORTAGE_LOG);
+    const data = shortageSheet.getDataRange().getValues();
+    
+    // ヘッダー行をスキップして、該当する受注IDの記録を探す
+    const shortageItems = [];
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === orderId) {
+        shortageItems.push({
+          materialId: data[i][5] || '',
+          materialName: data[i][6] || '',
+          requiredQty: data[i][7] || 0,
+          currentStock: data[i][8] || 0,
+          shortageQty: data[i][9] || 0
+        });
+      }
+    }
+
+    if (shortageItems.length === 0) {
+      if (status === 'Shortage') {
+        showAlert(`受注ID: ${orderId}\n\n不足資材の記録が見つかりませんでした。\n受注時にBOMが登録されていなかった可能性があります。`);
+      } else {
+        showAlert(`受注ID: ${orderId}\n\nこの受注には不足資材がありません。\nステータス: ${status}`);
+      }
+      return;
+    }
+
+    // 不足資材の一覧を表示
+    let message = `受注ID: ${orderId}\n\n不足資材一覧:\n\n`;
+    shortageItems.forEach((item, index) => {
+      message += `${index + 1}. ${item.materialId}${item.materialName ? ' (' + item.materialName + ')' : ''}\n`;
+      message += `   必要数量: ${item.requiredQty.toLocaleString()}\n`;
+      message += `   現在庫: ${item.currentStock.toLocaleString()}\n`;
+      message += `   不足数量: ${item.shortageQty.toLocaleString()}\n\n`;
+    });
+
+    // Shortage_Logシートを表示
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const shortageSheetObj = getSheet(SHEET_NAMES.SHORTAGE_LOG);
+    ss.setActiveSheet(shortageSheetObj);
+    
+    // 該当する受注IDの行をハイライト
+    const dataRange = shortageSheetObj.getDataRange();
+    const values = dataRange.getValues();
+    const highlightRows = [];
+    for (let i = 1; i < values.length; i++) {
+      if (values[i][0] === orderId) {
+        highlightRows.push(i + 1);
+      }
+    }
+    
+    if (highlightRows.length > 0) {
+      // 最初の行にスクロール
+      shortageSheetObj.setActiveRange(shortageSheetObj.getRange(highlightRows[0], 1));
+      // すべての該当行を選択
+      const ranges = highlightRows.map(row => shortageSheetObj.getRange(row, 1, 1, 11));
+      const unionRange = ranges.reduce((acc, range) => {
+        return acc ? acc.union(range) : range;
+      });
+      shortageSheetObj.setActiveRange(unionRange);
+    }
+
+    showAlert(message);
+  } catch (error) {
+    if (error.message.includes('見つかりません')) {
+      showAlert(`不足資材ログシートが存在しません。\n受注時に不足資材が発生すると自動的に作成されます。`);
+    } else {
+      showAlert(`不足資材の取得エラー: ${error.message}`);
+    }
   }
 }
