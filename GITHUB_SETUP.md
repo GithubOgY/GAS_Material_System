@@ -1,103 +1,99 @@
-# GitHubリポジトリ登録手順
+# GitHubリポジトリ セットアップガイド
 
-## 1. Gitユーザー情報の設定
+このドキュメントでは、このプロジェクト（GAS資材・売上管理システム）をGitHubで管理するための手順を説明します。
 
-まず、Gitのユーザー名とメールアドレスを設定してください。
+## リポジトリ情報
 
-### グローバル設定（すべてのリポジトリに適用）
+- **リポジトリURL**: https://github.com/GithubOgY/GAS_Material_System.git
+- **デフォルトブランチ**: `master`
+
+## 1. 環境設定
+
+Gitのユーザー名とメールアドレスが設定されているか確認してください。
+
 ```powershell
-git config --global user.name "あなたの名前"
-git config --global user.email "your-email@example.com"
-```
+# 設定確認
+git config --list
 
-### このリポジトリのみに設定
-```powershell
+# 設定コマンド（未設定の場合）
 git config user.name "あなたの名前"
 git config user.email "your-email@example.com"
 ```
 
-**注意**: GitHubにプッシュする場合は、GitHubアカウントに登録されているメールアドレスを使用することを推奨します。
+## 2. リポジトリのセットアップ（初回のみ）
 
-## 2. 初回コミットの作成
+### 既存のリポジトリをクローンする場合
 
-ユーザー情報を設定した後、以下のコマンドでコミットを作成します：
-
-```powershell
-git commit -m "Initial commit: GAS資材・売上管理システム"
-```
-
-## 3. GitHubリポジトリの作成
-
-1. GitHubにログインします（https://github.com）
-2. 右上の「+」ボタンをクリックし、「New repository」を選択
-3. リポジトリ名を入力（例: `GAS_Material_System`）
-4. 説明を追加（任意）
-5. **Public** または **Private** を選択
-6. **「Initialize this repository with a README」のチェックを外す**（既にREADME.mdがあるため）
-7. 「Create repository」をクリック
-
-## 4. ローカルリポジトリをGitHubに接続
-
-GitHubでリポジトリを作成すると、表示されるコマンドを実行します。通常は以下のようになります：
+このプロジェクトを新しく環境に持ってくる場合は、クローンが最も簡単です。
 
 ```powershell
-# リモートリポジトリを追加
-git remote add origin https://github.com/あなたのユーザー名/GAS_Material_System.git
-
-# メインブランチの名前を確認（master または main）
-git branch
-
-# ブランチ名が main の場合は、master を main にリネーム
-git branch -M main
-
-# GitHubにプッシュ
-git push -u origin main
+git clone https://github.com/GithubOgY/GAS_Material_System.git
+cd GAS_Material_System
 ```
 
-または、ブランチが `master` の場合は：
+### ローカルプロジェクトをGitHubに接続する場合
+
+既にローカルにファイルがあり、それをGitHubにアップロードする場合の手順です。
+
+1. **Gitの初期化**（まだの場合）
+   ```powershell
+   git init
+   git add .
+   git commit -m "Initial commit"
+   ```
+
+2. **リモートリポジトリの追加**
+   ```powershell
+   git remote add origin https://github.com/GithubOgY/GAS_Material_System.git
+   ```
+
+3. **リモートへのプッシュ**
+   
+   現在のデフォルトブランチは `master` です。
+   ```powershell
+   git push -u origin master
+   ```
+
+   ※ 以前の手順にあった `main` へのリネームは不要です。
+
+## 3. 開発フロー
+
+### 変更の記録と反映
 
 ```powershell
-git remote add origin https://github.com/あなたのユーザー名/GAS_Material_System.git
-git push -u origin master
+# 1. 変更状態の確認
+git status
+
+# 2. 変更をステージング（全ての変更を追加）
+git add .
+
+# 3. コミット（変更内容の保存）
+git commit -m "変更内容の説明"
+
+# 4. GitHubへプッシュ
+git push origin master
 ```
 
-## 5. 認証
+### 最新コードの取得
 
-プッシュ時に認証が求められる場合があります：
-
-- **Personal Access Token (PAT) を使用する場合**:
-  - GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)
-  - 新しいトークンを生成し、`repo` スコープを付与
-  - パスワードの代わりにトークンを使用
-
-- **Git Credential Manager を使用する場合**:
-  - 初回プッシュ時にブラウザで認証画面が開きます
-
-## トラブルシューティング
-
-### リモートリポジトリが既に存在する場合
 ```powershell
-git remote -v
+git pull origin master
 ```
 
-既に設定されている場合は、削除して再設定：
-```powershell
-git remote remove origin
-git remote add origin https://github.com/あなたのユーザー名/GAS_Material_System.git
-```
+## 4. トラブルシューティング
 
-### プッシュが拒否される場合
-GitHubでリポジトリを作成する際にREADMEを追加してしまった場合：
-```powershell
-git pull origin main --allow-unrelated-histories
-git push -u origin main
-```
+### 認証エラーが出る場合
+GitHubへのプッシュ時にパスワードを求められた場合、**Personal Access Token (PAT)** を使用するか、**Git Credential Manager** を利用してください。GitHubのログインパスワードは使用できません。
 
-## 次のステップ
+### 競合（Conflict）が発生した場合
+`git pull` 時に競合が発生した場合は、競合箇所を手動で修正し、再度コミットしてください。
 
-リポジトリが正常にプッシュされたら、以下のことができます：
+## 5. Cursor / MCPツールの活用
 
-- GitHub上でコードを確認
-- 他の開発者と共有
-- IssuesやPull Requestsを使用した開発管理
-- GitHub Actionsでの自動化（将来の拡張）
+Cursorエディタを使用している場合、GitHub MCPサーバー（Model Context Protocol）を利用してリポジトリ操作を効率化できます。
+
+- **リポジトリ検索**: `mcp_github_search_repositories`
+- **ファイル操作**: `mcp_github_get_file_contents`, `mcp_github_push_files`
+- **プルリクエスト作成**: `mcp_github_create_pull_request`
+
+これにより、ターミナル操作を行わずにエディタとの対話だけでGit操作を完結させることも可能です。
