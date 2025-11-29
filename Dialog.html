@@ -171,6 +171,15 @@
                 </select>
             </div>
 
+            <!-- Material Request Fields (資材払い出し依頼書作成専用) -->
+            <div class="form-group hidden" id="materialRequestFields">
+                <p style="color: #666; margin-bottom: 15px;">
+                    Material_OrdersシートのStatusが「Accept」の資材を抽出して、<br>
+                    JPF様宛ての資材払い出し依頼書を作成します。<br>
+                    （作成後、Statusは「Ordered」に自動更新されます）
+                </p>
+            </div>
+
             <button type="submit">送信</button>
         </form>
     </div>
@@ -192,6 +201,7 @@
             document.getElementById('bomMaterialsGroup').classList.add('hidden');
             document.getElementById('productOrderFields').classList.add('hidden');
             document.getElementById('deliveryResponseFields').classList.add('hidden');
+            document.getElementById('materialRequestFields').classList.add('hidden');
             document.getElementById('materialOrderFields').classList.add('hidden');
             document.getElementById('quantityGroup').style.display = 'block';
             document.getElementById('customQtyGroup').classList.add('hidden');
@@ -389,11 +399,20 @@
                 } else {
                     console.error('納期回答書作成: 受注日リストの設定に失敗');
                 }
+            } else if (mode === 'CREATE_MATERIAL_REQUEST') {
+                title.textContent = '資材払い出し依頼書作成';
+                // すべての通常フィールドを非表示
+                document.getElementById('itemGroup').style.display = 'none';
+                document.getElementById('productOrderFields').style.display = 'none';
+                document.getElementById('quantityGroup').style.display = 'none';
+                document.getElementById('customQtyGroup').style.display = 'none';
+                // 資材払い出し依頼書作成専用フィールドを表示
+                document.getElementById('materialRequestFields').classList.remove('hidden');
             }
 
             // リストボックスの設定確認（開発時のみ）
             // ORDER_MATERIALは動的に追加するためここではチェックしない
-            if (mode !== 'REGISTER_BOM' && mode !== 'CREATE_DELIVERY_RESPONSE' && mode !== 'ORDER_MATERIAL' && select && select.options.length <= 1) {
+            if (mode !== 'REGISTER_BOM' && mode !== 'CREATE_DELIVERY_RESPONSE' && mode !== 'CREATE_MATERIAL_REQUEST' && mode !== 'ORDER_MATERIAL' && select && select.options.length <= 1) {
                 console.warn(`${mode}モード: リストボックスにオプションが設定されていません`);
             }
         }
@@ -937,6 +956,9 @@
                     return;
                 }
                 formData.orderDate = orderDate;
+            } else if (mode === 'CREATE_MATERIAL_REQUEST') {
+                // 資材払い出し依頼書作成モード（選択不要、そのまま送信）
+                // formDataに特別な値は設定しない（Code.gs側でMaterial_Ordersシートから直接取得）
             } else {
                 // 資材発注モード
                 const materialOrders = [];

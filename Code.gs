@@ -38,8 +38,9 @@ function onOpen() {
     .addItem('6. BOMを登録する', 'openBOMDialog')
     .addSeparator()
     .addItem('7. 納期回答書を作成する', 'openDeliveryResponseDialog')
+    .addItem('8. 資材払い出し依頼書を作成する', 'openMaterialRequestDialog')
     .addSeparator()
-    .addItem('8. 不足資材を確認する (選択行)', 'menuShowShortage')
+    .addItem('9. 不足資材を確認する (選択行)', 'menuShowShortage')
     .addToUi();
 }
 
@@ -63,6 +64,11 @@ function openBOMDialog() {
 function openDeliveryResponseDialog() {
   PropertiesService.getScriptProperties().setProperty(PROP_MODE, 'CREATE_DELIVERY_RESPONSE');
   showDialog('納期回答書作成');
+}
+
+function openMaterialRequestDialog() {
+  PropertiesService.getScriptProperties().setProperty(PROP_MODE, 'CREATE_MATERIAL_REQUEST');
+  showDialog('資材払い出し依頼書作成');
 }
 
 function showDialog(title) {
@@ -96,6 +102,9 @@ function getDialogData() {
     } else if (mode === 'CREATE_DELIVERY_RESPONSE') {
       // 納期回答書作成モードでは受注日のリストを取得
       data = getOrderDatesList();
+    } else if (mode === 'CREATE_MATERIAL_REQUEST') {
+      // 資材払い出し依頼書作成モードではデータ取得不要（ダイアログなしで直接作成）
+      data = [];
     }
   } catch (error) {
     Logger.log(`getDialogData エラー: ${error.message}`);
@@ -187,6 +196,14 @@ function processForm(form) {
     };
   }
 
+  if (form.mode === 'CREATE_MATERIAL_REQUEST') {
+    // 資材払い出し依頼書作成の場合（製造業者選択不要）
+    const result = createMaterialRequestDocument();
+    return { 
+      message: `資材払い出し依頼書を作成しました。\n資材種類数: ${result.materialCount}種類\n合計数量: ${result.totalQuantity.toLocaleString()}\n\n${result.documentUrl}` 
+    };
+  }
+
   if (form.mode === 'MANUFACTURE_PRODUCT') {
     // 製造業者選択の場合
     if (!form.itemId) {
@@ -242,7 +259,7 @@ function processForm(form) {
       // 資材名を取得
       const materialName = getMaterialName(materialOrder.materialId) || '';
       // Material_Ordersシートの構造: OrderID, Date, MaterialID, MaterialName, Quantity, Status, ExpectedReceiptDate
-      sheet.appendRow([orderId, date, materialOrder.materialId, materialName, qty, 'Ordered', expectedReceiptDate]);
+      sheet.appendRow([orderId, date, materialOrder.materialId, materialName, qty, 'Accept', expectedReceiptDate]);
       orderIds.push(orderId);
       successCount++;
     }
@@ -1018,8 +1035,16 @@ function createDeliveryResponseDocument(orderDate) {
   // A4横の設定
   const pageWidth = 11.69; // インチ（A4横）
   const pageHeight = 8.27; // インチ（A4縦）
+  const margin = 36; // 0.5インチ = 36ポイント（余白を小さく）
+
   body.setPageWidth(pageWidth * 72); // ポイントに変換
   body.setPageHeight(pageHeight * 72);
+  
+  // 余白設定
+  body.setMarginTop(margin);
+  body.setMarginBottom(margin);
+  body.setMarginLeft(margin);
+  body.setMarginRight(margin);
   
   // 既存のテキストをクリア
   body.clear();
@@ -1028,14 +1053,29 @@ function createDeliveryResponseDocument(orderDate) {
   const title = body.appendParagraph('納期回答書');
   title.setHeading(DocumentApp.ParagraphHeading.HEADING1);
   title.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
-  title.setSpacingAfter(20);
+  title.setSpacingAfter(6);
+  
+  // 日付（右寄せ）
+  const datePara = body.appendParagraph(todayStr);
+  datePara.setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  datePara.setSpacingAfter(3);
+
+  // 宛先（左寄せ）
+  const recipient = body.appendParagraph('JPF 様');
+  recipient.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  recipient.setAlignment(DocumentApp.HorizontalAlignment.LEFT);
+  recipient.setSpacingAfter(2);
+  
+  // 差出人（右寄せ）
+  const sender = body.appendParagraph('合同会社KAMIDA');
+  sender.setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  sender.setSpacingAfter(8);
   
   // 基本情報
-  body.appendParagraph(`回答日: ${todayStr}`).setSpacingAfter(5);
-  body.appendParagraph(`受注日: ${orderDateStr}`).setSpacingAfter(20);
+  body.appendParagraph(`受注日: ${orderDateStr}`).setSpacingAfter(6);
   
   // 受注一覧のテーブル
-  body.appendParagraph('受注一覧').setHeading(DocumentApp.ParagraphHeading.HEADING2).setSpacingAfter(10);
+  body.appendParagraph('受注一覧').setHeading(DocumentApp.ParagraphHeading.HEADING2).setSpacingAfter(3);
   
   // テーブルのヘッダー行を作成
   const tableData = [['発注番号', '商品番号', '商品名', '数量', '納期']];
@@ -1046,11 +1086,18 @@ function createDeliveryResponseDocument(orderDate) {
     const deliveryDateStr = deliveryDateObj ? 
       Utilities.formatDate(deliveryDateObj, Session.getScriptTimeZone(), 'yyyy年MM月dd日') : '';
     
+    // 数値を整数に変換して文字列にする
+    const clientOrderNumber = order.clientOrderNumber ? 
+      String(Math.floor(Number(order.clientOrderNumber))) : '';
+    const productNumber = order.productNumber ? 
+      String(Math.floor(Number(order.productNumber))) : '';
+    const quantity = Math.floor(Number(order.quantity));
+    
     tableData.push([
-      order.clientOrderNumber || '',
-      order.productNumber || '',
+      clientOrderNumber,
+      productNumber,
       order.productName || '',
-      order.quantity.toString(),
+      quantity.toString(),
       deliveryDateStr
     ]);
   });
@@ -1059,10 +1106,19 @@ function createDeliveryResponseDocument(orderDate) {
   
   // テーブルのスタイル設定（A4横に合わせて幅を調整）
   table.setBorderWidth(1);
-  const numColumns = table.getNumColumns();
-  const columnWidth = (pageWidth * 72 - 100) / numColumns; // ページ幅から余白を引いて列数で割る
-  for (let i = 0; i < numColumns; i++) {
-    table.setColumnWidth(i, columnWidth);
+  // 列数は最初の行のセル数から取得
+  const numColumns = table.getRow(0).getNumCells();
+  // ページ幅から左右の余白を引く
+  const availableWidth = pageWidth * 72 - (margin * 2);
+  
+  // 列幅の比率を定義（発注番号、商品番号、数量は0.5倍、商品名は2.5倍、納期は1.0倍）
+  const columnRatios = [0.5, 0.5, 2.5, 0.5, 1.0]; // 発注番号、商品番号、商品名、数量、納期
+  const totalRatio = columnRatios.reduce((sum, ratio) => sum + ratio, 0);
+  const baseWidth = availableWidth / totalRatio;
+  
+  // 各列の幅を設定
+  for (let i = 0; i < numColumns && i < columnRatios.length; i++) {
+    table.setColumnWidth(i, baseWidth * columnRatios[i]);
   }
   
   // ヘッダー行のスタイル
@@ -1072,19 +1128,19 @@ function createDeliveryResponseDocument(orderDate) {
     headerRow.getCell(i).editAsText().setBold(true);
   }
   
-  body.appendParagraph('').setSpacingAfter(20);
+  body.appendParagraph('').setSpacingAfter(6);
   
   // 集計情報
   const totalQuantity = orders.reduce((sum, order) => sum + order.quantity, 0);
-  body.appendParagraph(`合計数量: ${totalQuantity.toLocaleString()}`).setSpacingAfter(10);
-  body.appendParagraph(`受注件数: ${orders.length}件`).setSpacingAfter(20);
+  body.appendParagraph(`合計数量: ${totalQuantity.toLocaleString()}`).setSpacingAfter(2);
+  body.appendParagraph(`受注件数: ${orders.length}件`).setSpacingAfter(6);
   
   // 備考
-  body.appendParagraph('備考').setHeading(DocumentApp.ParagraphHeading.HEADING2).setSpacingAfter(10);
-  body.appendParagraph('上記の通り、納期をご回答いたします。').setSpacingAfter(20);
+  body.appendParagraph('備考').setHeading(DocumentApp.ParagraphHeading.HEADING2).setSpacingAfter(3);
+  body.appendParagraph('上記の通り、納期をご回答いたします。').setSpacingAfter(6);
   
   // 署名欄
-  body.appendParagraph('').setSpacingAfter(10);
+  body.appendParagraph('').setSpacingAfter(3);
   body.appendParagraph('以上').setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
   
   // ドキュメントをフォルダに移動
@@ -1093,6 +1149,15 @@ function createDeliveryResponseDocument(orderDate) {
   
   // ドキュメントを保存
   doc.saveAndClose();
+  
+  // 発注番号のリストを取得（カンマ区切り）
+  const clientOrderNumbers = orders
+    .map(order => order.clientOrderNumber ? String(Math.floor(Number(order.clientOrderNumber))) : '')
+    .filter(num => num !== '')
+    .join(', ');
+  
+  // ドキュメントURLをシートに記録
+  recordDeliveryResponseUrl(orderDate, doc.getUrl(), orders.length, totalQuantity, clientOrderNumbers);
   
   return {
     documentUrl: doc.getUrl(),
@@ -1569,3 +1634,474 @@ function menuShowShortage() {
     }
   }
 }
+
+/**
+ * 指定した日付の受注データを取得する
+ * @param {string} targetDateStr - 対象日（YYYY-MM-DD形式）
+ * @return {Array<Object>} 受注データの配列
+ */
+function getOrdersByDate(targetDateStr) {
+  try {
+    const sheet = getSheet(SHEET_NAMES.PROD_ORDERS);
+    const data = sheet.getDataRange().getValues();
+    const orders = [];
+    
+    // targetDateStr を Dateオブジェクトに変換して比較用に正規化（時刻無視）
+    const targetDate = new Date(targetDateStr);
+    targetDate.setHours(0, 0, 0, 0);
+    
+    // 1行目はヘッダーなのでスキップ
+    for (let i = 1; i < data.length; i++) {
+      const rowDateVal = data[i][1]; // B列: Date
+      if (rowDateVal instanceof Date) {
+        const rowDate = new Date(rowDateVal);
+        rowDate.setHours(0, 0, 0, 0);
+        
+        // 同じ日付のデータを抽出
+        if (rowDate.getTime() === targetDate.getTime()) {
+          orders.push({
+            orderId: data[i][0],
+            date: data[i][1],
+            clientOrderNumber: data[i][2],
+            productNumber: data[i][3],
+            productName: data[i][4],
+            quantity: Number(data[i][5]),
+            deliveryDate: data[i][6],
+            status: data[i][7],
+            manufacturer: data[i][8]
+          });
+        }
+      }
+    }
+    return orders;
+  } catch (error) {
+    Logger.log(`getOrdersByDate エラー: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * 受注日のリストを取得する（納期回答書作成用）
+ * @return {Array<Object>} 日付IDと表示名のリスト
+ */
+function getOrderDatesList() {
+  try {
+    const sheet = getSheet(SHEET_NAMES.PROD_ORDERS);
+    const data = sheet.getDataRange().getValues();
+    const dateMap = new Map();
+    
+    // 1行目はヘッダーなのでスキップ
+    for (let i = 1; i < data.length; i++) {
+      const dateVal = data[i][1]; // B列: Date
+      if (dateVal instanceof Date) {
+        const dateStr = Utilities.formatDate(dateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        if (dateMap.has(dateStr)) {
+          dateMap.set(dateStr, dateMap.get(dateStr) + 1);
+        } else {
+          dateMap.set(dateStr, 1);
+        }
+      }
+    }
+    
+    const list = [];
+    // 日付の降順でソート
+    const sortedDates = Array.from(dateMap.keys()).sort().reverse();
+    
+    for (const dateStr of sortedDates) {
+      const count = dateMap.get(dateStr);
+      const dateObj = new Date(dateStr);
+      const displayDate = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy年MM月dd日');
+      list.push({
+        id: dateStr,
+        name: `${displayDate} (${count}件)`
+      });
+    }
+    
+    return list;
+  } catch (error) {
+    Logger.log(`getOrderDatesList エラー: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * 納期回答書のURLをシートに記録する
+ * @param {string} orderDate - 受注日（YYYY-MM-DD形式）
+ * @param {string} documentUrl - 作成されたドキュメントのURL
+ * @param {number} orderCount - 受注件数
+ * @param {number} totalQuantity - 合計数量
+ * @param {string} clientOrderNumbers - 発注番号（カンマ区切り）
+ */
+function recordDeliveryResponseUrl(orderDate, documentUrl, orderCount, totalQuantity, clientOrderNumbers) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetName = 'Delivery_Response_Log';
+    
+    // シートを取得または作成
+    let sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      // ヘッダー行を設定
+      sheet.appendRow(['作成日時', '受注日', '発注NO', '受注件数', '合計数量', 'ドキュメントURL']);
+      // ヘッダー行のスタイル設定
+      const headerRange = sheet.getRange(1, 1, 1, 6);
+      headerRange.setFontWeight('bold');
+      headerRange.setBackground('#e0e0e0');
+      // 列幅を調整
+      sheet.setColumnWidth(1, 150); // 作成日時
+      sheet.setColumnWidth(2, 120); // 受注日
+      sheet.setColumnWidth(3, 200); // 発注NO
+      sheet.setColumnWidth(4, 80);  // 受注件数
+      sheet.setColumnWidth(5, 80);  // 合計数量
+      sheet.setColumnWidth(6, 400); // ドキュメントURL
+    } else {
+      // 既存のシートの場合、ヘッダーに発注NO列があるか確認
+      const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const hasClientOrderColumn = headerRow.includes('発注NO');
+      
+      if (!hasClientOrderColumn) {
+        // 発注NO列がない場合は追加（既存データとの互換性のため、新規作成時のみ）
+        // この場合は既存のシート構造を変更しない方が安全なので、ログに記録
+        Logger.log('既存のDelivery_Response_Logシートには発注NO列がありません。新規作成時のみ発注NOが記録されます。');
+      }
+    }
+    
+    // 記録を追加
+    const createdAt = new Date();
+    const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const hasClientOrderColumn = headerRow.includes('発注NO');
+    
+    if (hasClientOrderColumn) {
+      // 発注NO列がある場合
+      sheet.appendRow([createdAt, orderDate, clientOrderNumbers || '', orderCount, totalQuantity, documentUrl]);
+    } else {
+      // 発注NO列がない場合（既存シートとの互換性）
+      sheet.appendRow([createdAt, orderDate, orderCount, totalQuantity, documentUrl]);
+    }
+    
+    Logger.log(`納期回答書URLを記録しました: ${documentUrl}`);
+  } catch (error) {
+    Logger.log(`recordDeliveryResponseUrl エラー: ${error.message}`);
+    // エラーが発生しても処理を続行（URL記録は必須ではない）
+  }
+}
+
+/**
+ * Material_OrdersシートからStatus='Accept'の資材データを取得する
+ * @return {Array<Object>} 資材データの配列（行番号も含む）
+ */
+function getAcceptedMaterials() {
+  try {
+    const sheet = getSheet(SHEET_NAMES.MAT_ORDERS);
+    const data = sheet.getDataRange().getValues();
+    const materials = [];
+    
+    // 1行目はヘッダーなのでスキップ
+    // Material_Ordersシートの構造: OrderID, Date, MaterialID, MaterialName, Quantity, Status, ExpectedReceiptDate
+    for (let i = 1; i < data.length; i++) {
+      const status = data[i][5]; // F列（Status）
+      
+      // Statusが'Accept'の場合のみ抽出
+      if (status === 'Accept') {
+        materials.push({
+          rowIndex: i + 1, // シートの行番号（1ベース）
+          orderId: data[i][0],
+          date: data[i][1],
+          materialId: data[i][2],
+          materialName: data[i][3],
+          quantity: Number(data[i][4]),
+          status: data[i][5],
+          expectedReceiptDate: data[i][6]
+        });
+      }
+    }
+    return materials;
+  } catch (error) {
+    Logger.log(`getAcceptedMaterials エラー: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * 資材払い出し依頼書を作成する
+ * @return {Object} 作成結果（documentUrlを含む）
+ */
+function createMaterialRequestDocument() {
+  // Material_OrdersシートからStatus='Accept'の資材データを取得
+  const materials = getAcceptedMaterials();
+  
+  if (materials.length === 0) {
+    throw new Error('Statusが「Accept」の資材が見つかりませんでした。');
+  }
+  
+  // 作成後にStatusを'Ordered'に変更するための行番号リストを保存
+  const rowIndicesToUpdate = materials.map(m => m.rowIndex);
+  
+  // 資材IDごとに数量を集計（受領予定日も考慮）
+  const materialMap = new Map(); // key: 資材ID, value: { materialId, materialName, totalQuantity, earliestReceiptDate }
+  
+  for (const material of materials) {
+    const matId = String(material.materialId).trim();
+    const matName = material.materialName || '';
+    const qty = Number(material.quantity) || 0;
+    const expectedReceiptDate = material.expectedReceiptDate;
+    
+    if (matId && qty > 0) {
+      if (materialMap.has(matId)) {
+        const existing = materialMap.get(matId);
+        existing.totalQuantity += qty;
+        // 受領予定日が設定されている場合、最も早い日付を保持
+        if (expectedReceiptDate) {
+          const receiptDate = expectedReceiptDate instanceof Date ? expectedReceiptDate : new Date(expectedReceiptDate);
+          if (!existing.earliestReceiptDate || receiptDate < existing.earliestReceiptDate) {
+            existing.earliestReceiptDate = receiptDate;
+          }
+        }
+      } else {
+        const receiptDate = expectedReceiptDate ? (expectedReceiptDate instanceof Date ? expectedReceiptDate : new Date(expectedReceiptDate)) : null;
+        materialMap.set(matId, {
+          materialId: matId,
+          materialName: matName,
+          totalQuantity: qty,
+          earliestReceiptDate: receiptDate
+        });
+      }
+    }
+  }
+  
+  if (materialMap.size === 0) {
+    throw new Error('有効な資材が見つかりませんでした。');
+  }
+  
+  // ドライブのルートフォルダに資材払い出し依頼書フォルダを作成（既に存在する場合は取得）
+  const folderName = '資材払い出し依頼書';
+  let folder;
+  try {
+    const folders = DriveApp.getFoldersByName(folderName);
+    if (folders.hasNext()) {
+      folder = folders.next();
+    } else {
+      folder = DriveApp.createFolder(folderName);
+    }
+  } catch (error) {
+    Logger.log(`フォルダ作成エラー: ${error.message}`);
+    folder = DriveApp.getRootFolder();
+  }
+  
+  // 日付フォーマット
+  const todayStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy年MM月dd日');
+  
+  // ドキュメント名を生成
+  const docName = `資材払い出し依頼書_${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd')}`;
+  
+  // 新しいGoogle Docsドキュメントを作成
+  const doc = DocumentApp.create(docName);
+  const body = doc.getBody();
+  
+  // A4横の設定
+  const pageWidth = 11.69; // インチ（A4横）
+  const pageHeight = 8.27; // インチ（A4縦）
+  const margin = 36; // 0.5インチ = 36ポイント（余白を小さく）
+
+  body.setPageWidth(pageWidth * 72); // ポイントに変換
+  body.setPageHeight(pageHeight * 72);
+  
+  // 余白設定
+  body.setMarginTop(margin);
+  body.setMarginBottom(margin);
+  body.setMarginLeft(margin);
+  body.setMarginRight(margin);
+  
+  // 既存のテキストをクリア
+  body.clear();
+  
+  // 資材払い出し依頼書の内容を作成
+  const title = body.appendParagraph('資材払い出し依頼書');
+  title.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  title.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  title.setSpacingAfter(6);
+  
+  // 日付（右寄せ）
+  const datePara = body.appendParagraph(todayStr);
+  datePara.setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  datePara.setSpacingAfter(3);
+
+  // 宛先（左寄せ）
+  const recipient = body.appendParagraph('JPF 様');
+  recipient.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  recipient.setAlignment(DocumentApp.HorizontalAlignment.LEFT);
+  recipient.setSpacingAfter(2);
+  
+  // 差出人（右寄せ）
+  const sender = body.appendParagraph('合同会社KAMIDA');
+  sender.setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  sender.setSpacingAfter(8);
+  
+  // 資材一覧のテーブル
+  body.appendParagraph('資材一覧').setHeading(DocumentApp.ParagraphHeading.HEADING2).setSpacingAfter(3);
+  
+  // テーブルのヘッダー行を作成
+  const tableData = [['資材ID', '資材名', '数量', '受領予定日']];
+  
+  // 資材データをテーブルに追加（資材IDでソート）
+  const materialsArray = Array.from(materialMap.values());
+  materialsArray.sort((a, b) => {
+    // 資材IDでソート（数値の場合は数値として比較）
+    const idA = String(a.materialId).trim();
+    const idB = String(b.materialId).trim();
+    const numA = /^[0-9]+$/.test(idA) ? parseInt(idA, 10) : Infinity;
+    const numB = /^[0-9]+$/.test(idB) ? parseInt(idB, 10) : Infinity;
+    if (numA !== Infinity && numB !== Infinity) {
+      return numA - numB;
+    }
+    return idA.localeCompare(idB);
+  });
+  
+  materialsArray.forEach(material => {
+    const quantity = Math.floor(material.totalQuantity);
+    // 受領予定日をフォーマット
+    let receiptDateStr = '';
+    if (material.earliestReceiptDate) {
+      receiptDateStr = Utilities.formatDate(material.earliestReceiptDate, Session.getScriptTimeZone(), 'yyyy年MM月dd日');
+    }
+    
+    tableData.push([
+      String(material.materialId),
+      material.materialName || '',
+      quantity.toString(),
+      receiptDateStr
+    ]);
+  });
+  
+  const table = body.appendTable(tableData);
+  
+  // テーブルのスタイル設定（A4横に合わせて幅を調整）
+  table.setBorderWidth(1);
+  // 列数は最初の行のセル数から取得
+  const numColumns = table.getRow(0).getNumCells();
+  // ページ幅から左右の余白を引く
+  const availableWidth = pageWidth * 72 - (margin * 2);
+  
+  // 列幅の比率を定義（資材ID: 0.5倍、資材名: 2.0倍、数量: 0.5倍、受領予定日: 1.0倍）
+  const columnRatios = [0.5, 2.0, 0.5, 1.0];
+  const totalRatio = columnRatios.reduce((sum, ratio) => sum + ratio, 0);
+  const baseWidth = availableWidth / totalRatio;
+  
+  // 各列の幅を設定
+  for (let i = 0; i < numColumns && i < columnRatios.length; i++) {
+    table.setColumnWidth(i, baseWidth * columnRatios[i]);
+  }
+  
+  // ヘッダー行のスタイル
+  const headerRow = table.getRow(0);
+  headerRow.setBackgroundColor('#e0e0e0');
+  for (let i = 0; i < numColumns; i++) {
+    headerRow.getCell(i).editAsText().setBold(true);
+  }
+  
+  body.appendParagraph('').setSpacingAfter(6);
+  
+  // 集計情報
+  const totalQuantity = materialsArray.reduce((sum, material) => sum + Math.floor(material.totalQuantity), 0);
+  body.appendParagraph(`資材種類数: ${materialsArray.length}種類`).setSpacingAfter(2);
+  body.appendParagraph(`合計数量: ${totalQuantity.toLocaleString()}`).setSpacingAfter(6);
+  
+  // 備考
+  body.appendParagraph('備考').setHeading(DocumentApp.ParagraphHeading.HEADING2).setSpacingAfter(3);
+  body.appendParagraph('上記の資材の払い出しをお願いいたします。').setSpacingAfter(6);
+  
+  // 署名欄
+  body.appendParagraph('').setSpacingAfter(3);
+  body.appendParagraph('以上').setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  
+  // ドキュメントをフォルダに移動
+  const file = DriveApp.getFileById(doc.getId());
+  file.moveTo(folder);
+  
+  // ドキュメントを保存
+  doc.saveAndClose();
+  
+  // 資材IDのリストを取得（カンマ区切り）
+  const materialIds = materialsArray
+    .map(material => String(material.materialId))
+    .join(', ');
+  
+  // ドキュメントURLをシートに記録
+  recordMaterialRequestUrl(doc.getUrl(), materialsArray.length, totalQuantity, materialIds);
+  
+  // 作成に使用した資材のStatusを'Ordered'に変更
+  updateMaterialOrderStatus(rowIndicesToUpdate, 'Ordered');
+  
+  return {
+    documentUrl: doc.getUrl(),
+    materialCount: materialsArray.length,
+    totalQuantity: totalQuantity
+  };
+}
+
+/**
+ * Material_Ordersシートの指定した行のStatusを更新する
+ * @param {Array<number>} rowIndices - 更新する行番号の配列（1ベース）
+ * @param {string} newStatus - 新しいStatus値
+ */
+function updateMaterialOrderStatus(rowIndices, newStatus) {
+  try {
+    const sheet = getSheet(SHEET_NAMES.MAT_ORDERS);
+    
+    // Status列はF列（6列目）
+    const statusColumn = 6;
+    
+    // 各行のStatusを更新
+    for (const rowIndex of rowIndices) {
+      sheet.getRange(rowIndex, statusColumn).setValue(newStatus);
+    }
+    
+    Logger.log(`${rowIndices.length}件の資材発注のStatusを「${newStatus}」に更新しました。`);
+  } catch (error) {
+    Logger.log(`updateMaterialOrderStatus エラー: ${error.message}`);
+    // エラーが発生しても処理を続行
+  }
+}
+
+/**
+ * 資材払い出し依頼書のURLをシートに記録する
+ * @param {string} documentUrl - 作成されたドキュメントのURL
+ * @param {number} materialCount - 資材種類数
+ * @param {number} totalQuantity - 合計数量
+ * @param {string} materialIds - 資材ID（カンマ区切り）
+ */
+function recordMaterialRequestUrl(documentUrl, materialCount, totalQuantity, materialIds) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetName = 'Material_Request_Log';
+    
+    // シートを取得または作成
+    let sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      // ヘッダー行を設定
+      sheet.appendRow(['作成日時', '宛先', '資材種類数', '合計数量', '資材ID', 'ドキュメントURL']);
+      // ヘッダー行のスタイル設定
+      const headerRange = sheet.getRange(1, 1, 1, 6);
+      headerRange.setFontWeight('bold');
+      headerRange.setBackground('#e0e0e0');
+      // 列幅を調整
+      sheet.setColumnWidth(1, 150); // 作成日時
+      sheet.setColumnWidth(2, 100); // 宛先
+      sheet.setColumnWidth(3, 80);  // 資材種類数
+      sheet.setColumnWidth(4, 80);  // 合計数量
+      sheet.setColumnWidth(5, 300); // 資材ID
+      sheet.setColumnWidth(6, 400); // ドキュメントURL
+    }
+    
+    // 記録を追加
+    const createdAt = new Date();
+    sheet.appendRow([createdAt, 'JPF様', materialCount, totalQuantity, materialIds || '', documentUrl]);
+    
+    Logger.log(`資材払い出し依頼書URLを記録しました: ${documentUrl}`);
+  } catch (error) {
+    Logger.log(`recordMaterialRequestUrl エラー: ${error.message}`);
+    // エラーが発生しても処理を続行（URL記録は必須ではない）
+  }
+}
+
